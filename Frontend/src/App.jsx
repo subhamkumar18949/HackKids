@@ -3,6 +3,7 @@ import LandingPage from './pages/LandingPage'
 import AuthForm from './pages/AuthForm'
 import SenderDashboard from './pages/SenderDashboard'
 import ReceiverScanner from './pages/ReceiverScanner'
+import DeliveryDashboard from './pages/DeliveryDashboard'
 import ScanPage from './pages/ScanPage'
 import Dashboard from './pages/Dashboard'
 
@@ -21,14 +22,7 @@ function App() {
         
         <Route path="/receiver/scanner" element={<ReceiverScanner />} />
         
-        <Route path="/delivery/dashboard" element={
-          <div className="min-h-screen bg-gradient-to-br from-orange-50 to-orange-100 flex items-center justify-center">
-            <div className="text-center">
-              <h1 className="text-4xl font-bold text-orange-800 mb-4">🚚 Delivery Dashboard</h1>
-              <p className="text-orange-600">Manage routes, update delivery status, track packages</p>
-            </div>
-          </div>
-        } />
+        <Route path="/delivery/dashboard" element={<DeliveryDashboard />} />
       </Routes>
     </div>
   )

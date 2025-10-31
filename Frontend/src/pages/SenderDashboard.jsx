@@ -75,41 +75,95 @@ function SenderDashboard() {
     const userData = localStorage.getItem('user');
     if (userData) {
       setUser(JSON.parse(userData));
+      loadLivePackages();
     } else {
       navigate('/auth/sender?mode=login');
       return;
     }
   }, [navigate]);
 
+  const loadLivePackages = async () => {
+    try {
+      const response = await fetch('http://127.0.0.1:8000/sender/packages', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      });
+
+      if (response.ok) {
+        const packages = await response.json();
+        setLivePackages(packages.map(pkg => ({
+          id: pkg.package_id,
+          orderId: pkg.order_id,
+          type: pkg.package_type,
+          deviceId: pkg.device_id,
+          status: pkg.current_status,
+          customer: 'Customer', // You might want to add this to backend
+          temperature: pkg.latest_esp32_data?.temperature ? `${pkg.latest_esp32_data.temperature}°C` : 'N/A',
+          tamperStatus: pkg.latest_esp32_data?.tamper_status || 'unknown',
+          location: pkg.current_location,
+          createdAt: new Date(pkg.created_at).toLocaleString(),
+          checkpointsCount: pkg.checkpoints_count
+        })));
+      }
+    } catch (error) {
+      console.error('Error loading packages:', error);
+    }
+  };
+
   const handleCreatePackage = async (e) => {
     e.preventDefault();
     setIsCreatingPackage(true);
 
     try {
-      // Simulate package creation
-      const packageData = {
-        ...newPackage,
-        id: 'PKG' + Date.now(),
-        qrUrl: `https://veriseal.app/scan?token=pkg_${Date.now()}`,
-        pin: Math.floor(100000 + Math.random() * 900000).toString(),
-        createdAt: new Date().toISOString()
-      };
-
-      // Update device status
-      setDevices(prev => prev.map(device => 
-        device.id === newPackage.deviceId 
-          ? { ...device, status: 'deployed', orderId: newPackage.orderId }
-          : device
-      ));
-
-      setCreatedPackage(packageData);
-      setNewPackage({
-        orderId: '',
-        packageType: 'electronics',
-        customerPhone: '',
-        deviceId: '',
-        notes: ''
+      // Call backend API to create package
+      const response = await fetch('http://127.0.0.1:8000/packages/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        },
+        body: JSON.stringify({
+          order_id: newPackage.orderId,
+          package_type: newPackage.packageType,
+          receiver_phone: newPackage.customerPhone,
+          device_id: newPackage.deviceId,
+          sender_id: user.id,
+          notes: newPackage.notes
+        })
       });
+
+      if (response.ok) {
+        const packageData = await response.json();
+        
+        // Update device status
+        setDevices(prev => prev.map(device => 
+          device.id === newPackage.deviceId 
+            ? { ...device, status: 'deployed', orderId: newPackage.orderId }
+            : device
+        ));
+
+        setCreatedPackage({
+          ...packageData,
+          id: packageData.package_id,
+          qrUrl: packageData.qr_url,
+          createdAt: new Date().toISOString()
+        });
+        
+        setNewPackage({
+          orderId: '',
+          packageType: 'electronics',
+          customerPhone: '',
+          deviceId: '',
+          notes: ''
+        });
+
+        // Refresh live packages
+        loadLivePackages();
+      } else {
+        const error = await response.json();
+        console.error('Error creating package:', error);
+      }
 
     } catch (error) {
       console.error('Error creating package:', error);
@@ -504,7 +558,15 @@ function SenderDashboard() {
             {/* Live Tracking Tab */}
             {activeTab === 'live' && (
               <div>
-                <h3 className="text-lg font-semibold text-gray-800 mb-6">Live Package Tracking</h3>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-semibold text-gray-800">Live Package Tracking</h3>
+                  <button
+                    onClick={loadLivePackages}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                  >
+                    🔄 Refresh
+                  </button>
+                </div>
                 
                 <div className="overflow-x-auto">
                   <table className="w-full border border-gray-200 rounded-lg">
@@ -514,9 +576,10 @@ function SenderDashboard() {
                         <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Order ID</th>
                         <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Type</th>
                         <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Location</th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Checkpoints</th>
                         <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Temperature</th>
                         <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Security</th>
-                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Location</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
@@ -527,22 +590,40 @@ function SenderDashboard() {
                           <td className="px-4 py-3 text-sm text-gray-600">{pkg.type}</td>
                           <td className="px-4 py-3">
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              pkg.status === 'delivered' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+                              pkg.status === 'delivered' ? 'bg-green-100 text-green-800' : 
+                              pkg.status === 'at_checkpoint' ? 'bg-blue-100 text-blue-800' :
+                              pkg.status === 'created' ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-gray-100 text-gray-800'
                             }`}>
                               {pkg.status.replace('_', ' ')}
                             </span>
                           </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{pkg.location}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
+                              {pkg.checkpointsCount} passed
+                            </span>
+                          </td>
                           <td className="px-4 py-3 text-sm text-gray-600">{pkg.temperature}</td>
                           <td className="px-4 py-3">
-                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              pkg.tamperStatus === 'secure' ? 'bg-green-100 text-green-800' :
+                              pkg.tamperStatus === 'tampered' ? 'bg-red-100 text-red-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
                               {pkg.tamperStatus}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-600">{pkg.location}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  
+                  {livePackages.length === 0 && (
+                    <div className="text-center py-8 text-gray-500">
+                      No packages found. Create your first package to start tracking!
+                    </div>
+                  )}
                 </div>
               </div>
             )}
