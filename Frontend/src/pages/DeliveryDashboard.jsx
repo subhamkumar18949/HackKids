@@ -11,6 +11,8 @@ function DeliveryDashboard() {
   const [packageToken, setPackageToken] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [packageData, setPackageData] = useState(null);
+  const [qrData, setQrData] = useState(null);  // ESP32 data from QR code
+  const [showUploadButton, setShowUploadButton] = useState(false);
   
   // Checkpoint state
   const [selectedCheckpoint, setSelectedCheckpoint] = useState('CP001');
@@ -76,46 +78,67 @@ function DeliveryDashboard() {
 
   const handleScanPackage = async () => {
     if (!packageToken.trim()) {
-      setScanResult('❌ Please enter a package token');
+      setScanResult('❌ Please enter a package token or QR data');
       return;
     }
 
     setIsScanning(true);
     setScanResult('');
+    setShowUploadButton(false);
 
     try {
-      const response = await fetch(`http://127.0.0.1:8000/delivery/package/${packageToken}`, {
+      // Try to parse as JSON (QR code with ESP32 data)
+      let parsedQR = null;
+      try {
+        parsedQR = JSON.parse(packageToken);
+      } catch (e) {
+        // Not JSON, treat as simple token
+        parsedQR = { package_token: packageToken };
+      }
+
+      // Extract package token
+      const token = parsedQR.package_token || packageToken;
+
+      // Call backend to validate package
+      const response = await fetch('http://127.0.0.1:8000/delivery/scan-qr', {
+        method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-        }
+        },
+        body: JSON.stringify({ package_token: token })
       });
 
       if (response.ok) {
         const data = await response.json();
         setPackageData(data);
-        setScanResult(`✅ Package found: ${data.package_id}`);
         
-        // Update ESP32 data with latest readings if available
-        if (data.latest_esp32_data) {
-          setEsp32Data(prev => ({
-            ...prev,
-            ...data.latest_esp32_data
-          }));
+        // If QR contains ESP32 data, use it
+        if (parsedQR.esp32_data) {
+          setQrData(parsedQR);
+          setEsp32Data(parsedQR.esp32_data);
+          setScanResult(`✅ ${data.message}\n\n📦 Package: ${data.package_id}\n🔧 ESP32 Data Loaded from QR\n\n⚠️ Review the sensor data below and click Upload.`);
+          setShowUploadButton(true);
+        } else {
+          setScanResult(`✅ ${data.message}\n\n📦 Package: ${data.package_id}\n\n💡 Tip: Scan QR with ESP32 data or enter manually.`);
+          setShowUploadButton(true);
         }
       } else {
         const error = await response.json();
         setScanResult(`❌ ${error.detail || 'Package not found'}`);
         setPackageData(null);
+        setShowUploadButton(false);
       }
     } catch (error) {
-      setScanResult('❌ Error scanning package');
+      setScanResult('❌ Error scanning QR code');
       setPackageData(null);
+      setShowUploadButton(false);
     } finally {
       setIsScanning(false);
     }
   };
 
-  const handleCheckpointScan = async () => {
+  const handleUploadScan = async (decision) => {
     if (!packageData) {
       setScanResult('❌ Please scan a package first');
       return;
@@ -124,38 +147,49 @@ function DeliveryDashboard() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/delivery/scan-checkpoint', {
+      // Get package token from QR data or input
+      const token = qrData?.package_token || packageToken;
+
+      const response = await fetch('http://127.0.0.1:8000/delivery/upload-scan', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`
         },
         body: JSON.stringify({
-          package_token: packageToken,
+          package_token: token,
           checkpoint_id: selectedCheckpoint,
           esp32_data: esp32Data,
-          status: checkpointStatus,
-          notes: notes
+          notes: notes,
+          decision: decision  // "proceed" or "return"
         })
       });
 
       if (response.ok) {
         const data = await response.json();
-        setScanResult(`✅ Checkpoint scan recorded successfully at ${data.timestamp}`);
+        
+        if (decision === 'proceed') {
+          setScanResult(`✅ Uploaded Successfully!\n\n📍 Checkpoint: ${selectedCheckpoint}\n📦 Package: ${data.package_id}\n✅ Action: Proceed to next checkpoint\n⏰ ${new Date(data.timestamp).toLocaleString()}`);
+        } else {
+          setScanResult(`🚨 Uploaded - Return to Sender\n\n📍 Checkpoint: ${selectedCheckpoint}\n📦 Package: ${data.package_id}\n❌ Action: Return to sender\n⏰ ${new Date(data.timestamp).toLocaleString()}`);
+        }
         
         // Reset form
         setPackageData(null);
         setPackageToken('');
+        setQrData(null);
         setNotes('');
+        setShowUploadButton(false);
         
         // Reload packages
         loadPackages();
       } else {
         const error = await response.json();
-        setScanResult(`❌ ${error.detail || 'Failed to record checkpoint'}`);
+        setScanResult(`❌ ${error.detail || 'Failed to upload scan'}`);
       }
     } catch (error) {
-      setScanResult('❌ Error recording checkpoint');
+      setScanResult('❌ Error uploading scan data');
+      console.error('Upload Error:', error);
     } finally {
       setIsSubmitting(false);
     }
@@ -306,23 +340,15 @@ function DeliveryDashboard() {
                             ? 'bg-green-50 border-green-200 text-green-800'
                             : 'bg-red-50 border-red-200 text-red-800'
                         }`}>
-                          <p className="font-medium">{scanResult}</p>
+                          <p className="font-medium whitespace-pre-line">{scanResult}</p>
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Checkpoint & ESP32 Data */}
+                  {/* ESP32 Data & Upload */}
                   <div className="bg-gray-50 rounded-xl p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-semibold text-gray-800">🔧 Checkpoint Data</h3>
-                      <button
-                        onClick={simulateESP32Reading}
-                        className="px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
-                      >
-                        📡 Update Sensors
-                      </button>
-                    </div>
+                    <h3 className="text-lg font-semibold text-gray-800 mb-4">🔧 ESP32 Sensor Data</h3>
                     
                     <div className="space-y-4">
                       {/* Checkpoint Selection */}
@@ -343,76 +369,34 @@ function DeliveryDashboard() {
                         </select>
                       </div>
 
-                      {/* ESP32 Sensor Data */}
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-semibold text-gray-700 mb-1">
-                            Temperature (°C)
-                          </label>
-                          <input
-                            type="number"
-                            step="0.1"
-                            value={esp32Data.temperature}
-                            onChange={(e) => setEsp32Data(prev => ({...prev, temperature: parseFloat(e.target.value)}))}
-                            className="w-full p-2 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none"
-                          />
+                      {/* ESP32 Data Display */}
+                      <div className="p-4 bg-white border border-gray-300 rounded-lg">
+                        <h4 className="font-semibold text-gray-800 mb-3">📊 Sensor Readings</h4>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div className="p-2 bg-blue-50 rounded">
+                            <span className="text-gray-600">🌡️ Temperature:</span>
+                            <span className="font-bold ml-2">{esp32Data.temperature}°C</span>
+                          </div>
+                          <div className="p-2 bg-blue-50 rounded">
+                            <span className="text-gray-600">💧 Humidity:</span>
+                            <span className="font-bold ml-2">{esp32Data.humidity}%</span>
+                          </div>
+                          <div className="p-2 bg-blue-50 rounded">
+                            <span className="text-gray-600">🔋 Battery:</span>
+                            <span className="font-bold ml-2">{esp32Data.battery_level}%</span>
+                          </div>
+                          <div className="p-2 bg-blue-50 rounded">
+                            <span className="text-gray-600">🔒 Status:</span>
+                            <span className={`font-bold ml-2 ${esp32Data.tamper_status === 'secure' ? 'text-green-600' : 'text-red-600'}`}>
+                              {esp32Data.tamper_status === 'secure' ? '✅ Secure' : '⚠️ Tampered'}
+                            </span>
+                          </div>
                         </div>
-                        
-                        <div>
-                          <label className="block text-sm font-semibold text-gray-700 mb-1">
-                            Battery (%)
-                          </label>
-                          <input
-                            type="number"
-                            value={esp32Data.battery_level}
-                            onChange={(e) => setEsp32Data(prev => ({...prev, battery_level: parseInt(e.target.value)}))}
-                            className="w-full p-2 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none"
-                          />
-                        </div>
-                        
-                        <div>
-                          <label className="block text-sm font-semibold text-gray-700 mb-1">
-                            Tamper Status
-                          </label>
-                          <select
-                            value={esp32Data.tamper_status}
-                            onChange={(e) => setEsp32Data(prev => ({...prev, tamper_status: e.target.value}))}
-                            className="w-full p-2 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none"
-                          >
-                            <option value="secure">🔒 Secure</option>
-                            <option value="tampered">⚠️ Tampered</option>
-                          </select>
-                        </div>
-                        
-                        <div>
-                          <label className="block text-sm font-semibold text-gray-700 mb-1">
-                            Shock Detection
-                          </label>
-                          <select
-                            value={esp32Data.shock_detected}
-                            onChange={(e) => setEsp32Data(prev => ({...prev, shock_detected: e.target.value === 'true'}))}
-                            className="w-full p-2 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none"
-                          >
-                            <option value="false">✅ No Shock</option>
-                            <option value="true">⚠️ Shock Detected</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      {/* Status & Notes */}
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">
-                          Checkpoint Status
-                        </label>
-                        <select
-                          value={checkpointStatus}
-                          onChange={(e) => setCheckpointStatus(e.target.value)}
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none"
-                        >
-                          <option value="passed">✅ Passed</option>
-                          <option value="failed">❌ Failed</option>
-                          <option value="pending">⏳ Pending</option>
-                        </select>
+                        {qrData && (
+                          <div className="mt-2 text-xs text-green-600">
+                            ✅ Data loaded from QR code
+                          </div>
+                        )}
                       </div>
 
                       <div>
@@ -424,18 +408,36 @@ function DeliveryDashboard() {
                           onChange={(e) => setNotes(e.target.value)}
                           className="w-full p-3 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none"
                           rows={3}
-                          placeholder="Add any notes about this checkpoint..."
+                          placeholder="Add any notes about this scan..."
                         />
                       </div>
 
-                      {/* Submit Button */}
-                      <button
-                        onClick={handleCheckpointScan}
-                        disabled={!packageData || isSubmitting}
-                        className="w-full py-3 bg-orange-600 text-white rounded-lg font-semibold hover:bg-orange-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {isSubmitting ? 'Recording...' : 'Record Checkpoint Scan'}
-                      </button>
+                      {/* Upload Buttons */}
+                      {showUploadButton && (
+                        <div className="space-y-3">
+                          <button
+                            onClick={() => handleUploadScan('proceed')}
+                            disabled={isSubmitting}
+                            className="w-full py-4 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-lg font-bold text-lg hover:from-green-700 hover:to-green-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                          >
+                            {isSubmitting ? '⏳ Uploading...' : '✅ Upload & Proceed'}
+                          </button>
+                          
+                          <button
+                            onClick={() => handleUploadScan('return')}
+                            disabled={isSubmitting}
+                            className="w-full py-4 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg font-bold text-lg hover:from-red-700 hover:to-red-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                          >
+                            {isSubmitting ? '⏳ Uploading...' : '🚨 Upload & Return to Sender'}
+                          </button>
+                        </div>
+                      )}
+
+                      {!showUploadButton && (
+                        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
+                          💡 Scan a QR code first to enable upload
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

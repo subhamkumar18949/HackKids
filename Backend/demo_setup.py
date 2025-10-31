@@ -44,12 +44,12 @@ def setup_demo_data():
                     "highlight": "Complete journey from warehouse to customer"
                 },
                 {
-                    "title": "⚠️ Tampered Package (Security Alert)",
+                    "title": "🚨 Tampered Package (ESP32 Detected Shock)",
                     "token": "demo_token_tampered_003",
                     "pin": "789012", 
-                    "status": "SECURITY INCIDENT - Tamper detected",
-                    "checkpoints": "Failed at checkpoint 2",
-                    "highlight": "Demonstrates tamper detection capabilities"
+                    "status": "RETURNING TO SENDER - Tampering detected",
+                    "checkpoints": "CP1 ✅ passed → ESP32 detected shock → CP2 🚨 return to sender",
+                    "highlight": "Shows ESP32 tamper detection between checkpoints"
                 },
                 {
                     "title": "👕 Fashion Package (Ready to Ship)",
@@ -90,13 +90,24 @@ def setup_demo_data():
             print("   • Enter corresponding PIN to see full journey")
             print("   • Check sender dashboard for live updates")
             print()
-            print("3. 🚨 Highlight key features:")
-            print("   • Real-time ESP32 sensor data")
-            print("   • Tamper detection alerts")
-            print("   • Complete supply chain transparency")
-            print("   • Role-based access control")
+            print("3. 🚨 Test Tamper Detection Flow:")
+            print("   • Package #3 shows ESP32 detected shock at 10:15 AM")
+            print("   • CP1 scan: ✅ Good to go (no tampering yet)")
+            print("   • ESP32 reports shock between CP1 and CP2")
+            print("   • CP2 scan: 🚨 Return to sender (tampering detected)")
+            print()
+            print("4. 🎯 Key Features to Highlight:")
+            print("   • ESP32 continuously monitors packages")
+            print("   • Automatic tamper detection with timestamps")
+            print("   • Logistics sees 'proceed' or 'return to sender'")
+            print("   • Complete transparency for receivers")
             print()
             print("✨ Your demo database is ready!")
+            print("🚀 New Endpoints Available:")
+            print("   • POST /esp32/report-tamper - ESP32 reports tampering")
+            print("   • POST /delivery/scan-qr - Checkpoint scan with tamper check")
+            print("   • POST /receiver/verify-package - View complete journey")
+            print()
             print("Start your FastAPI server and impress the judges! 🏆")
             
         else:

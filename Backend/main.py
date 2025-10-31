@@ -12,6 +12,7 @@ import string
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from bson import ObjectId
+from web3 import Web3
 
 # Load environment variables from .env file
 load_dotenv()
@@ -41,6 +42,62 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Blockchain Configuration ---
+# Get blockchain secrets from .env file
+BLOCKCHAIN_PRIVATE_KEY = os.getenv("SERVER_PRIVATE_KEY")
+ALCHEMY_URL = os.getenv("ALCHEMY_URL")
+CONTRACT_ADDRESS = "0x4b96Ec59eB55a82D4F35A381250e97d7E0Ddae09"
+
+# Smart Contract ABI
+CONTRACT_ABI = [
+    {
+        "inputs": [
+            {"internalType": "string", "name": "_deviceId", "type": "string"},
+            {"internalType": "string", "name": "_userId", "type": "string"}
+        ],
+        "name": "addLog",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "name": "allLogs",
+        "outputs": [
+            {"internalType": "uint256", "name": "timestamp", "type": "uint256"},
+            {"internalType": "string", "name": "deviceId", "type": "string"},
+            {"internalType": "string", "name": "userId", "type": "string"}
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "getLogCount",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function"
+    }
+]
+
+# Initialize Web3 connection (will be None if blockchain is not configured)
+web3 = None
+contract = None
+server_account = None
+
+if ALCHEMY_URL and BLOCKCHAIN_PRIVATE_KEY:
+    try:
+        web3 = Web3(Web3.HTTPProvider(ALCHEMY_URL))
+        server_account = web3.eth.account.from_key(BLOCKCHAIN_PRIVATE_KEY)
+        web3.eth.default_account = server_account.address
+        contract = web3.eth.contract(address=CONTRACT_ADDRESS, abi=CONTRACT_ABI)
+        print(f"✅ Blockchain connected: {server_account.address}")
+    except Exception as e:
+        print(f"⚠️ Blockchain connection failed: {e}")
+        web3 = None
+else:
+    print("⚠️ Blockchain not configured (missing ALCHEMY_URL or SERVER_PRIVATE_KEY)")
 
 # --- MongoDB Connection ---
 @app.on_event("startup")
@@ -124,6 +181,22 @@ class CheckpointScan(BaseModel):
     status: str
     notes: Optional[str] = None
 
+class QRScanRequest(BaseModel):
+    package_token: str
+    checkpoint_id: str
+    notes: Optional[str] = None
+
+class ESP32TamperReport(BaseModel):
+    package_token: str
+    device_id: str
+    tamper_type: str  # "shock", "temperature", "seal_broken"
+    sensor_data: dict
+    gps_location: Optional[str] = None
+
+class ReceiverVerification(BaseModel):
+    package_token: str
+    pin: str
+
 # --- JWT Helper Functions ---
 def create_access_token(data: dict):
     to_encode = data.copy()
@@ -205,6 +278,99 @@ async def register_user(user_data: UserRegistration):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- Blockchain Endpoints ---
+
+@app.post("/api/log-access")
+async def log_access(data: dict):
+    """
+    Log device access to blockchain (immutable audit trail)
+    Expected JSON: {"deviceId": "ESP32_001", "userId": "User_Alice"}
+    """
+    if not web3 or not contract:
+        raise HTTPException(status_code=503, detail="Blockchain service not available")
+    
+    device_id = data.get("deviceId")
+    user_id = data.get("userId")
+
+    if not device_id or not user_id:
+        raise HTTPException(status_code=400, detail="Missing 'deviceId' or 'userId'")
+
+    print(f"📝 Logging to blockchain: Device={device_id}, User={user_id}")
+
+    try:
+        # Build transaction to call addLog function
+        tx = contract.functions.addLog(
+            device_id,
+            user_id
+        ).build_transaction({
+            'from': server_account.address,
+            'nonce': web3.eth.get_transaction_count(server_account.address),
+            'gas': 200000,
+            'gasPrice': web3.eth.gas_price
+        })
+
+        # Sign transaction
+        signed_tx = web3.eth.account.sign_transaction(tx, private_key=BLOCKCHAIN_PRIVATE_KEY)
+        
+        # Send transaction
+        tx_hash = web3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        
+        # Wait for confirmation
+        tx_receipt = web3.eth.wait_for_transaction_receipt(tx_hash)
+
+        print(f"✅ Blockchain log added! TX: {tx_hash.hex()}")
+
+        return {
+            "status": "success",
+            "transaction_hash": tx_hash.hex(),
+            "block_number": tx_receipt.blockNumber,
+            "device_id": device_id,
+            "user_id": user_id
+        }
+
+    except Exception as e:
+        print(f"❌ Blockchain error: {e}")
+        raise HTTPException(status_code=500, detail=f"Blockchain error: {str(e)}")
+
+@app.get("/api/get-all-logs")
+async def get_all_logs():
+    """
+    Read all access logs from blockchain
+    This is a read-only call (no gas cost)
+    """
+    if not web3 or not contract:
+        raise HTTPException(status_code=503, detail="Blockchain service not available")
+    
+    print("📖 Reading logs from blockchain...")
+    
+    log_list = []
+    
+    try:
+        # Get total log count
+        total_logs = contract.functions.getLogCount().call()
+        
+        # Loop from newest to oldest
+        for i in range(total_logs - 1, -1, -1):
+            log_entry = contract.functions.allLogs(i).call()
+            
+            log_list.append({
+                "timestamp": log_entry[0],
+                "deviceId": log_entry[1],
+                "userId": log_entry[2]
+            })
+
+        print(f"✅ Retrieved {len(log_list)} logs from blockchain")
+        
+        return {
+            "status": "success",
+            "log_count": total_logs,
+            "logs": log_list
+        }
+    
+    except Exception as e:
+        print(f"❌ Blockchain read error: {e}")
+        raise HTTPException(status_code=500, detail=f"Blockchain error: {str(e)}")
 
 @app.post("/auth/login")
 async def login_user(login_data: UserLogin):
@@ -428,6 +594,247 @@ async def scan_checkpoint(checkpoint_data: CheckpointScan, token_data: dict = De
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/delivery/scan-qr")
+async def scan_qr_code(scan_data: dict, token_data: dict = Depends(require_role("delivery"))):
+    """
+    Logistics scans QR code - just validates and returns package info
+    ESP32 data comes from QR code, not database
+    """
+    try:
+        package_token = scan_data.get("package_token")
+        
+        # Find package by QR token
+        package = await app.mongodb.packages.find_one({"package_token": package_token})
+        
+        if not package:
+            raise HTTPException(status_code=404, detail="Package not found. Invalid QR code.")
+        
+        # Return package info - ESP32 data will come from QR code in frontend
+        return {
+            "status": "success",
+            "package_id": package["package_id"],
+            "order_id": package["order_id"],
+            "package_type": package["package_type"],
+            "device_id": package["device_id"],
+            "current_status": package["current_status"],
+            "current_location": package.get("current_location", "Unknown"),
+            "receiver_phone": package["receiver_phone"][-4:],  # Last 4 digits only
+            "message": "✅ Package found. Review ESP32 data and upload."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in scan_qr_code: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/delivery/upload-scan")
+async def upload_scan_data(scan_data: dict, token_data: dict = Depends(require_role("delivery"))):
+    """
+    Upload checkpoint scan with ESP32 data to database
+    Called after logistics reviews the QR data
+    """
+    try:
+        package_token = scan_data.get("package_token")
+        checkpoint_id = scan_data.get("checkpoint_id")
+        esp32_data = scan_data.get("esp32_data", {})
+        notes = scan_data.get("notes", "")
+        decision = scan_data.get("decision", "proceed")  # "proceed" or "return"
+        
+        # Find package
+        package = await app.mongodb.packages.find_one({"package_token": package_token})
+        
+        if not package:
+            raise HTTPException(status_code=404, detail="Package not found")
+        
+        # Determine status based on decision
+        if decision == "return":
+            status = "failed"
+            action = "return_to_sender"
+            current_status = "returning_to_sender"
+        else:
+            status = "passed"
+            action = "proceed"
+            current_status = "in_transit"
+        
+        # Create scan log entry with ESP32 data from QR
+        scan_log = {
+            "checkpoint_id": checkpoint_id,
+            "name": get_checkpoint_name(checkpoint_id),
+            "location": get_checkpoint_location(checkpoint_id),
+            "scanned_by": token_data["sub"],
+            "scanned_at": datetime.now(),
+            "status": status,
+            "action": action,
+            "esp32_data": esp32_data,  # Data from QR code
+            "notes": notes
+        }
+        
+        # Update package in database
+        update_data = {
+            "$push": {"scan_logs": scan_log},
+            "$set": {
+                "current_checkpoint": checkpoint_id,
+                "current_location": get_checkpoint_location(checkpoint_id),
+                "current_status": current_status,
+                "updated_at": datetime.now()
+            }
+        }
+        
+        await app.mongodb.packages.update_one(
+            {"package_token": package_token},
+            update_data
+        )
+        
+        return {
+            "status": "success",
+            "message": "✅ Scan data uploaded successfully",
+            "package_id": package["package_id"],
+            "checkpoint_id": checkpoint_id,
+            "action": action,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in upload_scan_data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/esp32/report-tamper")
+async def report_tamper(tamper_data: ESP32TamperReport):
+    """
+    ESP32 device reports tampering - creates timestamp in database
+    This is called automatically by ESP32 hardware when tampering detected
+    """
+    try:
+        # Find package
+        package = await app.mongodb.packages.find_one({"package_token": tamper_data.package_token})
+        
+        if not package:
+            raise HTTPException(status_code=404, detail="Package not found")
+        
+        # Verify device ID
+        if package["device_id"] != tamper_data.device_id:
+            raise HTTPException(status_code=403, detail="Device ID mismatch")
+        
+        # Create tamper event with timestamp
+        tamper_event = {
+            "timestamp": datetime.now(),
+            "tamper_type": tamper_data.tamper_type,
+            "sensor_data": tamper_data.sensor_data,
+            "gps_location": tamper_data.gps_location,
+            "detected_at": datetime.now().isoformat()
+        }
+        
+        # Add to database
+        await app.mongodb.packages.update_one(
+            {"package_token": tamper_data.package_token},
+            {
+                "$push": {"tamper_events": tamper_event},
+                "$set": {
+                    "is_tampered": True,
+                    "updated_at": datetime.now()
+                }
+            }
+        )
+        
+        print(f"🚨 TAMPER REPORTED: Package {package['package_id']} - {tamper_data.tamper_type}")
+        
+        return {
+            "status": "success",
+            "message": "Tamper event recorded",
+            "package_id": package["package_id"],
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in report_tamper: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/receiver/verify-package")
+async def verify_package(verification: ReceiverVerification):
+    """
+    Receiver scans QR and enters PIN to see complete journey
+    Shows ALL scan logs from logistics + tamper events
+    """
+    try:
+        # Find package
+        package = await app.mongodb.packages.find_one({"package_token": verification.package_token})
+        
+        if not package:
+            raise HTTPException(status_code=404, detail="Package not found. Invalid QR code.")
+        
+        # Verify PIN
+        if package["pin"] != verification.pin:
+            raise HTTPException(status_code=401, detail="Invalid PIN. Please check your SMS.")
+        
+        # Mark as authenticated
+        await app.mongodb.packages.update_one(
+            {"package_token": verification.package_token},
+            {"$set": {"authenticated": True, "authenticated_at": datetime.now()}}
+        )
+        
+        # Return complete journey
+        return {
+            "status": "success",
+            "message": "Package verified successfully",
+            "package": {
+                "package_id": package["package_id"],
+                "order_id": package["order_id"],
+                "package_type": package["package_type"],
+                "device_id": package["device_id"],
+                "receiver_phone": package["receiver_phone"],
+                "current_status": package["current_status"],
+                "current_location": package.get("current_location", "Unknown"),
+                "is_tampered": package.get("is_tampered", False),
+                "created_at": package["created_at"].isoformat(),
+                "updated_at": package["updated_at"].isoformat(),
+                
+                # Complete journey - ALL scan logs
+                "journey": {
+                    "total_scans": len(package.get("scan_logs", [])),
+                    "scan_logs": package.get("scan_logs", []),
+                    "tamper_events": package.get("tamper_events", []),
+                    "tamper_count": len(package.get("tamper_events", []))
+                }
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in verify_package: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/receiver/package/{package_token}")
+async def get_package_info(package_token: str):
+    """
+    Get basic package info before PIN entry
+    """
+    try:
+        package = await app.mongodb.packages.find_one({"package_token": package_token})
+        
+        if not package:
+            raise HTTPException(status_code=404, detail="Package not found")
+        
+        return {
+            "package_id": package["package_id"],
+            "order_id": package["order_id"],
+            "package_type": package["package_type"],
+            "current_status": package["current_status"],
+            "is_tampered": package.get("is_tampered", False),
+            "receiver_phone": package["receiver_phone"][-4:],
+            "requires_pin": True
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # --- Helper Functions ---
 
 def get_checkpoint_name(checkpoint_id: str) -> str:
@@ -476,9 +883,12 @@ async def create_mock_data():
                 "receiver_phone": "+91 98765 43210",
                 "pin": "123456",
                 "authenticated": False,
-                "current_status": "at_checkpoint",
+                "current_status": "in_transit",
                 "current_checkpoint": "CP003",
                 "current_location": "Delhi Transit Hub",
+                "is_tampered": False,
+                "tamper_events": [],
+                "scan_logs": [],
                 "checkpoints": [
                     {
                         "checkpoint_id": "CP001",
@@ -495,7 +905,9 @@ async def create_mock_data():
                             "gps_location": "19.0760,72.8777"
                         },
                         "status": "passed",
-                        "notes": "Package dispatched successfully"
+                        "action": "proceed",
+                        "tamper_check": "passed",
+                        "notes": "✅ No tampering detected. Good to go."
                     },
                     {
                         "checkpoint_id": "CP002",
@@ -512,7 +924,9 @@ async def create_mock_data():
                             "gps_location": "19.0760,72.8777"
                         },
                         "status": "passed",
-                        "notes": "Sorted and loaded for transit"
+                        "action": "proceed",
+                        "tamper_check": "passed",
+                        "notes": "✅ No tampering detected. Good to go."
                     },
                     {
                         "checkpoint_id": "CP003",
@@ -529,7 +943,9 @@ async def create_mock_data():
                             "gps_location": "28.7041,77.1025"
                         },
                         "status": "passed",
-                        "notes": "Arrived at transit hub"
+                        "action": "proceed",
+                        "tamper_check": "passed",
+                        "notes": "✅ No tampering detected. Good to go."
                     }
                 ],
                 "created_at": datetime(2025, 10, 31, 9, 0, 0),
@@ -549,6 +965,9 @@ async def create_mock_data():
                 "current_status": "delivered",
                 "current_checkpoint": "CP006",
                 "current_location": "Customer Location",
+                "is_tampered": False,
+                "tamper_events": [],
+                "scan_logs": [],
                 "checkpoints": [
                     {
                         "checkpoint_id": "CP001",
@@ -633,9 +1052,50 @@ async def create_mock_data():
                 "receiver_phone": "+91 98765 43212",
                 "pin": "789012",
                 "authenticated": False,
-                "current_status": "checkpoint_failed",
+                "current_status": "returning_to_sender",
                 "current_checkpoint": "CP002",
                 "current_location": "Mumbai Central Hub",
+                "is_tampered": True,
+                "tamper_detected_at": datetime(2025, 10, 31, 10, 15, 0),
+                "scan_logs": [
+                    {
+                        "checkpoint_id": "CP001",
+                        "name": "Warehouse Dispatch",
+                        "location": "Mumbai Warehouse",
+                        "scanned_by": "delivery_user_001",
+                        "scanned_at": datetime(2025, 10, 31, 8, 0, 0),
+                        "status": "passed",
+                        "action": "proceed",
+                        "tamper_check": "passed",
+                        "tamper_count": 0,
+                        "notes": "✅ No tampering detected. Good to proceed!"
+                    },
+                    {
+                        "checkpoint_id": "CP002",
+                        "name": "Local Hub",
+                        "location": "Mumbai Central Hub",
+                        "scanned_by": "delivery_user_002",
+                        "scanned_at": datetime(2025, 10, 31, 13, 20, 0),
+                        "status": "failed",
+                        "action": "return_to_sender",
+                        "tamper_check": "failed",
+                        "tamper_count": 1,
+                        "notes": "🚨 TAMPERING DETECTED! Return package to sender."
+                    }
+                ],
+                "tamper_events": [
+                    {
+                        "timestamp": datetime(2025, 10, 31, 10, 15, 0),
+                        "tamper_type": "shock",
+                        "sensor_data": {
+                            "shock_intensity": 8.5,
+                            "temperature": 45.2,
+                            "battery": 87
+                        },
+                        "gps_location": "19.0760,72.8777",
+                        "detected_at": "2025-10-31T10:15:00"
+                    }
+                ],
                 "checkpoints": [
                     {
                         "checkpoint_id": "CP001",
@@ -652,7 +1112,9 @@ async def create_mock_data():
                             "gps_location": "19.0760,72.8777"
                         },
                         "status": "passed",
-                        "notes": "Initial dispatch successful"
+                        "action": "proceed",
+                        "tamper_check": "passed",
+                        "notes": "✅ No tampering detected. Good to go."
                     },
                     {
                         "checkpoint_id": "CP002",
@@ -669,7 +1131,10 @@ async def create_mock_data():
                             "gps_location": "19.0760,72.8777"
                         },
                         "status": "failed",
-                        "notes": "⚠️ SECURITY ALERT: Tamper detected! Package shows signs of unauthorized access."
+                        "action": "return_to_sender",
+                        "reason": "Tampering detected",
+                        "tamper_count": 1,
+                        "notes": "🚨 TAMPERED - Returning to sender. 1 tamper event(s) detected."
                     }
                 ],
                 "created_at": datetime(2025, 10, 31, 7, 45, 0),
@@ -689,6 +1154,9 @@ async def create_mock_data():
                 "current_status": "created",
                 "current_checkpoint": None,
                 "current_location": "Warehouse",
+                "is_tampered": False,
+                "tamper_events": [],
+                "scan_logs": [],
                 "checkpoints": [],
                 "created_at": datetime(2025, 10, 31, 19, 0, 0),
                 "updated_at": datetime(2025, 10, 31, 19, 0, 0),
@@ -704,9 +1172,12 @@ async def create_mock_data():
                 "receiver_phone": "+91 98765 43214",
                 "pin": "321654",
                 "authenticated": False,
-                "current_status": "at_checkpoint",
+                "current_status": "in_transit",
                 "current_checkpoint": "CP005",
                 "current_location": "Local Delivery Center",
+                "is_tampered": False,
+                "tamper_events": [],
+                "scan_logs": [],
                 "checkpoints": [
                     {
                         "checkpoint_id": "CP001",
@@ -836,6 +1307,42 @@ async def get_delivery_packages(checkpoint_id: str = None, token_data: dict = De
         
         return packages
         
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/delivery/package/{package_id}")
+async def get_delivery_package_details(package_id: str, token_data: dict = Depends(require_role("delivery"))):
+    """
+    Get detailed package information for delivery dashboard
+    """
+    try:
+        package = await app.mongodb.packages.find_one({"package_id": package_id})
+        
+        if not package:
+            raise HTTPException(status_code=404, detail="Package not found")
+        
+        package["_id"] = str(package["_id"])
+        
+        return {
+            "package_id": package["package_id"],
+            "package_token": package["package_token"],
+            "order_id": package["order_id"],
+            "package_type": package["package_type"],
+            "device_id": package["device_id"],
+            "receiver_phone": package["receiver_phone"],
+            "current_status": package["current_status"],
+            "current_location": package["current_location"],
+            "current_checkpoint": package.get("current_checkpoint"),
+            "is_tampered": package.get("is_tampered", False),
+            "tamper_events": package.get("tamper_events", []),
+            "checkpoints": package.get("checkpoints", []),
+            "created_at": package["created_at"].isoformat(),
+            "updated_at": package["updated_at"].isoformat(),
+            "notes": package.get("notes")
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

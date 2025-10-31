@@ -53,17 +53,12 @@ function ReceiverScanner() {
   const verifyToken = async (tokenValue) => {
     try {
       setIsVerifying(true);
-      const response = await fetch(`http://127.0.0.1:8000/verify-token/${tokenValue}`);
+      const response = await fetch(`http://127.0.0.1:8000/receiver/package/${tokenValue}`);
       const data = await response.json();
       
       if (response.ok) {
         setPackageData(data);
-        if (data.authenticated) {
-          setIsAuthenticated(true);
-          fetchPackageStatus(tokenValue);
-        } else {
-          setShowPinEntry(true);
-        }
+        setShowPinEntry(true);
       } else {
         setScanResult('❌ Invalid QR code or token');
       }
@@ -85,14 +80,13 @@ function ReceiverScanner() {
     setPinError('');
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/verify-pin', {
+      const response = await fetch('http://127.0.0.1:8000/receiver/verify-package', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          token: token,
+          package_token: token,
           pin: pin
         })
       });
@@ -102,8 +96,12 @@ function ReceiverScanner() {
       if (response.ok) {
         setIsAuthenticated(true);
         setShowPinEntry(false);
-        setPackageData(data.seal_data);
-        setScanResult('✅ Authentication successful! Package verified.');
+        setPackageData(data.package);
+        
+        // Show journey summary
+        const journey = data.package.journey;
+        const tamperStatus = data.package.is_tampered ? '🚨 TAMPERED' : '✅ SAFE';
+        setScanResult(`✅ Package Verified!\n\nStatus: ${tamperStatus}\nTotal Scans: ${journey.total_scans}\nTamper Events: ${journey.tamper_count}`);
         
         // Add to scan history
         const newScan = {
@@ -111,7 +109,7 @@ function ReceiverScanner() {
           token: token,
           timestamp: new Date().toISOString(),
           status: 'verified',
-          package_type: data.seal_data?.package_type
+          package_id: data.package.package_id
         };
         const updatedHistory = [newScan, ...scanHistory.slice(0, 4)]; // Keep last 5
         setScanHistory(updatedHistory);
