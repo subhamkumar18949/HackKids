@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 function ReceiverScanner() {
   const navigate = useNavigate();
@@ -12,6 +13,9 @@ function ReceiverScanner() {
   const [scanResult, setScanResult] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [manualToken, setManualToken] = useState('');
+  const [showCamera, setShowCamera] = useState(false);
+  const scannerRef = useRef(null);
+  const qrScannerRef = useRef(null);
   
   // Authentication state
   const [token, setToken] = useState(null);
@@ -146,6 +150,67 @@ function ReceiverScanner() {
     }
   };
 
+  const startCameraScanner = () => {
+    setShowCamera(true);
+    
+    setTimeout(() => {
+      if (!qrScannerRef.current) {
+        qrScannerRef.current = new Html5QrcodeScanner(
+          "receiver-qr-reader",
+          { 
+            fps: 20,
+            qrbox: 250,
+            aspectRatio: 1.0,
+            rememberLastUsedCamera: true,
+            showTorchButtonIfSupported: true,
+            experimentalFeatures: {
+              useBarCodeDetectorIfSupported: true
+            },
+            formatsToSupport: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+          },
+          false
+        );
+
+        qrScannerRef.current.render(onScanSuccess, onScanError);
+      }
+    }, 200);
+  };
+
+  const stopCameraScanner = () => {
+    if (qrScannerRef.current) {
+      qrScannerRef.current.clear().catch(error => {
+        console.error("Failed to clear scanner:", error);
+      });
+      qrScannerRef.current = null;
+    }
+    setShowCamera(false);
+  };
+
+  const onScanSuccess = (decodedText, decodedResult) => {
+    console.log("QR Code scanned:", decodedText);
+    
+    stopCameraScanner();
+    
+    // Try to parse as JSON first
+    let tokenValue = decodedText;
+    try {
+      const parsed = JSON.parse(decodedText);
+      if (parsed.package_token) {
+        tokenValue = parsed.package_token;
+      }
+    } catch (e) {
+      // Not JSON, use as-is
+    }
+    
+    setToken(tokenValue);
+    setManualToken(tokenValue);
+    verifyToken(tokenValue);
+  };
+
+  const onScanError = (errorMessage) => {
+    // Ignore scanning errors
+  };
+
   const handleQRScan = async () => {
     setIsScanning(true);
     
@@ -162,8 +227,19 @@ function ReceiverScanner() {
   const handleManualTokenSubmit = (e) => {
     e.preventDefault();
     if (manualToken.trim()) {
-      setToken(manualToken.trim());
-      verifyToken(manualToken.trim());
+      // Try to parse as JSON first
+      let tokenValue = manualToken.trim();
+      try {
+        const parsed = JSON.parse(tokenValue);
+        if (parsed.package_token) {
+          tokenValue = parsed.package_token;
+        }
+      } catch (e) {
+        // Not JSON, use as-is
+      }
+      
+      setToken(tokenValue);
+      verifyToken(tokenValue);
     }
   };
 
@@ -180,6 +256,7 @@ function ReceiverScanner() {
   };
 
   const resetScan = () => {
+    stopCameraScanner();
     setToken(null);
     setShowPinEntry(false);
     setPin('');
@@ -189,6 +266,17 @@ function ReceiverScanner() {
     setScanResult('');
     setManualToken('');
   };
+
+  // Cleanup scanner on unmount
+  useEffect(() => {
+    return () => {
+      if (qrScannerRef.current) {
+        qrScannerRef.current.clear().catch(error => {
+          console.error("Failed to clear scanner on unmount:", error);
+        });
+      }
+    };
+  }, []);
 
   if (!user) {
     return <div>Loading...</div>;
@@ -304,48 +392,70 @@ function ReceiverScanner() {
           {/* Scanner Interface */}
           {!token && (
             <div className="space-y-6">
-              {/* QR Scanner Button */}
-              <div className="text-center">
-                <button
-                  onClick={handleQRScan}
-                  disabled={isScanning}
-                  className="px-12 py-6 text-xl font-bold rounded-2xl shadow-lg transform transition-all duration-200 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 hover:scale-105 text-white disabled:opacity-50"
-                >
-                  {isScanning ? (
-                    <div className="flex items-center gap-4">
-                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
-                      Scanning...
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-4">
-                      <span className="text-2xl">📷</span>
-                      Scan QR Code
-                    </div>
-                  )}
-                </button>
-              </div>
+              {/* Camera Scanner */}
+              {!showCamera && (
+                <div className="text-center">
+                  <button
+                    onClick={startCameraScanner}
+                    className="w-full py-6 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-bold text-xl hover:from-purple-700 hover:to-blue-700 transition-all shadow-lg flex items-center justify-center gap-3"
+                  >
+                    <span className="text-3xl">📷</span>
+                    Open Camera to Scan QR
+                  </button>
+                </div>
+              )}
+
+              {/* Camera View */}
+              {showCamera && (
+                <div className="space-y-3">
+                  <div className="p-4 bg-blue-50 border border-blue-300 rounded-lg">
+                    <p className="text-sm text-blue-800 mb-2">
+                      📷 <strong>To start camera:</strong>
+                    </p>
+                    <ol className="text-xs text-blue-700 space-y-1 ml-4">
+                      <li>1. Click "Request Camera Permissions" button below</li>
+                      <li>2. Browser will ask for permission</li>
+                      <li>3. Click "Allow" to start camera</li>
+                      <li>4. Point at QR code to scan automatically</li>
+                    </ol>
+                  </div>
+                  <div 
+                    id="receiver-qr-reader" 
+                    ref={scannerRef}
+                    className="rounded-lg overflow-hidden border-2 border-purple-500"
+                  ></div>
+                  <button
+                    onClick={stopCameraScanner}
+                    className="w-full py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors"
+                  >
+                    Close Camera
+                  </button>
+                </div>
+              )}
 
               {/* Manual Token Entry */}
-              <div className="border-t pt-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">
-                  Or enter token manually
-                </h3>
-                <form onSubmit={handleManualTokenSubmit} className="flex gap-3">
-                  <input
-                    type="text"
-                    value={manualToken}
-                    onChange={(e) => setManualToken(e.target.value)}
-                    placeholder="Enter package token"
-                    className="flex-1 p-3 border border-gray-300 rounded-xl focus:border-purple-500 focus:outline-none"
-                  />
-                  <button
-                    type="submit"
-                    className="px-6 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition-colors"
-                  >
-                    Verify
-                  </button>
-                </form>
-              </div>
+              {!showCamera && (
+                <div className="border-t pt-6">
+                  <div className="text-center text-sm text-gray-500 mb-2">
+                    Or enter manually
+                  </div>
+                  <form onSubmit={handleManualTokenSubmit} className="flex gap-3">
+                    <input
+                      type="text"
+                      value={manualToken}
+                      onChange={(e) => setManualToken(e.target.value)}
+                      placeholder="Paste QR JSON or token"
+                      className="flex-1 p-3 border border-gray-300 rounded-xl focus:border-purple-500 focus:outline-none"
+                    />
+                    <button
+                      type="submit"
+                      className="px-6 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition-colors"
+                    >
+                      Verify
+                    </button>
+                  </form>
+                </div>
+              )}
             </div>
           )}
 
