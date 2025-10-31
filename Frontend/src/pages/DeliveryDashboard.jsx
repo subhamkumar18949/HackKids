@@ -541,7 +541,7 @@ function DeliveryDashboard() {
                             disabled={isSubmitting}
                             className="w-full py-4 bg-linear-to-br from-green-600 to-green-700 text-white rounded-lg font-bold text-lg hover:from-green-700 hover:to-green-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
                           >
-                            {isSubmitting ? '⏳ Uploading...' : '✅ Upload & Proceed'}
+                            {isSubmitting ? '⏳ Uploading.......' : '✅ Upload & Proceed'}
                           </button>
                           
                           <button
