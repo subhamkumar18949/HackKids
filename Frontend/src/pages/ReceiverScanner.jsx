@@ -350,7 +350,7 @@ function ReceiverScanner() {
           )}
 
           {/* Scan Results */}
-          {scanResult && (
+          {scanResult && !isAuthenticated && (
             <div className={`p-6 rounded-xl border-2 mb-6 ${
               scanResult.includes('✅') || scanResult.includes('SAFE')
                 ? 'bg-green-50 border-green-200'
@@ -362,14 +362,182 @@ function ReceiverScanner() {
             </div>
           )}
 
-          {/* Reset Button */}
-          {token && (
+          {/* Journey Display - After Authentication */}
+          {isAuthenticated && packageData && (
+            <div className="space-y-6">
+              {/* Package Status Header */}
+              <div className={`p-6 rounded-xl border-2 ${
+                packageData.is_tampered 
+                  ? 'bg-red-50 border-red-300'
+                  : 'bg-green-50 border-green-300'
+              }`}>
+                <div className="text-center">
+                  <div className="text-6xl mb-4">
+                    {packageData.is_tampered ? '🚨' : '✅'}
+                  </div>
+                  <h3 className="text-2xl font-bold mb-2">
+                    {packageData.is_tampered ? 'Package Tampered!' : 'Package Verified!'}
+                  </h3>
+                  <div className="space-y-1 text-lg">
+                    <p><strong>Package ID:</strong> {packageData.package_id}</p>
+                    <p><strong>Order ID:</strong> {packageData.order_id}</p>
+                    <p><strong>Type:</strong> {packageData.package_type}</p>
+                    <p><strong>Status:</strong> {packageData.current_status}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Journey Timeline */}
+              <div className="bg-white border-2 border-gray-200 rounded-xl p-6">
+                <h3 className="text-2xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                  <span>📦</span> Package Journey
+                </h3>
+                
+                <div className="mb-4 p-4 bg-blue-50 rounded-lg">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-gray-600">Total Checkpoints:</span>
+                      <span className="font-bold ml-2">{packageData.journey?.total_scans || 0}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Tamper Events:</span>
+                      <span className={`font-bold ml-2 ${packageData.journey?.tamper_count > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                        {packageData.journey?.tamper_count || 0}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Checkpoint Logs */}
+                {packageData.journey?.scan_logs && packageData.journey.scan_logs.length > 0 ? (
+                  <div className="space-y-4">
+                    {packageData.journey.scan_logs.map((log, index) => (
+                      <div key={index} className="border-l-4 border-purple-500 pl-4 py-3 bg-gray-50 rounded-r-lg">
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <h4 className="font-bold text-lg text-gray-800">
+                              {log.action === 'proceed' ? '✅' : '🚨'} {log.name || log.checkpoint_id}
+                            </h4>
+                            <p className="text-sm text-gray-600">📍 {log.location}</p>
+                            <p className="text-xs text-gray-500">
+                              ⏰ {new Date(log.scanned_at).toLocaleString()}
+                            </p>
+                          </div>
+                          <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                            log.action === 'proceed' 
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}>
+                            {log.action === 'proceed' ? 'PROCEED' : 'RETURN'}
+                          </span>
+                        </div>
+
+                        {/* ESP32 Sensor Data */}
+                        {log.esp32_data && (
+                          <div className="mt-3 p-3 bg-white rounded-lg border border-gray-200">
+                            <h5 className="font-semibold text-sm text-gray-700 mb-2">📊 Sensor Readings:</h5>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div className="flex items-center gap-1">
+                                <span>🌡️</span>
+                                <span className="text-gray-600">Temp:</span>
+                                <span className="font-bold">{log.esp32_data.temperature}°C</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span>💧</span>
+                                <span className="text-gray-600">Humidity:</span>
+                                <span className="font-bold">{log.esp32_data.humidity}%</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span>🔋</span>
+                                <span className="text-gray-600">Battery:</span>
+                                <span className="font-bold">{log.esp32_data.battery_level}%</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span>🔒</span>
+                                <span className="text-gray-600">Status:</span>
+                                <span className={`font-bold ${
+                                  log.esp32_data.tamper_status === 'secure' 
+                                    ? 'text-green-600' 
+                                    : 'text-red-600'
+                                }`}>
+                                  {log.esp32_data.tamper_status === 'secure' ? 'Secure' : 'Tampered'}
+                                </span>
+                              </div>
+                            </div>
+                            {log.esp32_data.gps_location && (
+                              <div className="mt-2 text-xs text-gray-600">
+                                📍 GPS: {log.esp32_data.gps_location}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Notes */}
+                        {log.notes && (
+                          <div className="mt-2 p-2 bg-yellow-50 rounded border border-yellow-200">
+                            <p className="text-xs text-gray-700">
+                              <strong>📝 Notes:</strong> {log.notes}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>No checkpoint scans recorded yet.</p>
+                  </div>
+                )}
+
+                {/* Tamper Events */}
+                {packageData.journey?.tamper_events && packageData.journey.tamper_events.length > 0 && (
+                  <div className="mt-6 p-4 bg-red-50 border-2 border-red-300 rounded-lg">
+                    <h4 className="font-bold text-red-800 mb-3 flex items-center gap-2">
+                      <span>⚠️</span> Tamper Events Detected
+                    </h4>
+                    <div className="space-y-2">
+                      {packageData.journey.tamper_events.map((event, index) => (
+                        <div key={index} className="p-3 bg-white rounded border border-red-200">
+                          <p className="text-sm font-semibold text-red-800">
+                            {event.tamper_type} - {new Date(event.timestamp).toLocaleString()}
+                          </p>
+                          {event.sensor_data && (
+                            <p className="text-xs text-gray-600 mt-1">
+                              Data: {JSON.stringify(event.sensor_data)}
+                            </p>
+                          )}
+                          {event.gps_location && (
+                            <p className="text-xs text-gray-600">
+                              📍 Location: {event.gps_location}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Okay Button */}
+              <div className="text-center">
+                <button
+                  onClick={resetScan}
+                  className="px-12 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-bold text-lg hover:from-purple-700 hover:to-blue-700 transition-all shadow-lg"
+                >
+                  ✓ Okay
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Reset Button - Only show if not authenticated */}
+          {token && !isAuthenticated && (
             <div className="text-center">
               <button
                 onClick={resetScan}
                 className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors"
               >
-                Scan Another Package
+                Cancel
               </button>
             </div>
           )}

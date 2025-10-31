@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 function DeliveryDashboard() {
   const navigate = useNavigate();
@@ -13,6 +14,9 @@ function DeliveryDashboard() {
   const [packageData, setPackageData] = useState(null);
   const [qrData, setQrData] = useState(null);  // ESP32 data from QR code
   const [showUploadButton, setShowUploadButton] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const scannerRef = useRef(null);
+  const qrScannerRef = useRef(null);
   
   // Checkpoint state
   const [selectedCheckpoint, setSelectedCheckpoint] = useState('CP001');
@@ -207,6 +211,79 @@ function DeliveryDashboard() {
     });
   };
 
+  const startCameraScanner = () => {
+    setShowCamera(true);
+    
+    // Initialize scanner after a short delay to ensure DOM is ready
+    setTimeout(() => {
+      if (!qrScannerRef.current) {
+        qrScannerRef.current = new Html5QrcodeScanner(
+          "qr-reader",
+          { 
+            fps: 20,  // Increased for faster detection
+            qrbox: 250,  // Simplified box size
+            aspectRatio: 1.0,
+            rememberLastUsedCamera: true,
+            showTorchButtonIfSupported: true,
+            // More aggressive scanning
+            experimentalFeatures: {
+              useBarCodeDetectorIfSupported: true
+            },
+            // Support all QR code formats
+            formatsToSupport: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+          },
+          /* verbose= */ false
+        );
+
+        qrScannerRef.current.render(onScanSuccess, onScanError);
+      }
+    }, 200);
+  };
+
+  const stopCameraScanner = () => {
+    if (qrScannerRef.current) {
+      qrScannerRef.current.clear().catch(error => {
+        console.error("Failed to clear scanner:", error);
+      });
+      qrScannerRef.current = null;
+    }
+    setShowCamera(false);
+  };
+
+  const onScanSuccess = (decodedText, decodedResult) => {
+    console.log("QR Code scanned:", decodedText);
+    
+    // Stop scanner
+    stopCameraScanner();
+    
+    // Set the scanned text as package token
+    setPackageToken(decodedText);
+    
+    // Show what was scanned
+    setScanResult(`✅ QR Code Detected!\n\nScanned data: ${decodedText.substring(0, 100)}${decodedText.length > 100 ? '...' : ''}\n\nProcessing...`);
+    
+    // Automatically trigger scan after a moment
+    setTimeout(() => {
+      handleScanPackage();
+    }, 1000);
+  };
+
+  const onScanError = (errorMessage) => {
+    // Ignore errors - they happen frequently during scanning
+    // console.log("Scan error:", errorMessage);
+  };
+
+  // Cleanup scanner on unmount
+  useEffect(() => {
+    return () => {
+      if (qrScannerRef.current) {
+        qrScannerRef.current.clear().catch(error => {
+          console.error("Failed to clear scanner on unmount:", error);
+        });
+      }
+    };
+  }, []);
+
   const handleLogout = () => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('user');
@@ -218,14 +295,14 @@ function DeliveryDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-red-50">
+    <div className="min-h-screen bg-linear-to-br from-orange-50 via-white to-red-50">
       {/* Header */}
       <nav className="bg-white/80 backdrop-blur-md shadow-sm border-b border-gray-200/50">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             {/* Logo & User Info */}
             <div className="flex items-center gap-4">
-              <div className="w-10 h-10 bg-gradient-to-r from-orange-600 to-red-600 rounded-xl flex items-center justify-center">
+              <div className="w-10 h-10 bg-linear-to-br from-orange-600 to-red-600 rounded-xl flex items-center justify-center">
                 <span className="text-xl">🚚</span>
               </div>
               <div>
@@ -278,7 +355,7 @@ function DeliveryDashboard() {
             {activeTab === 'scanner' && (
               <div className="max-w-4xl mx-auto">
                 <div className="text-center mb-8">
-                  <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-r from-orange-600 to-red-600 rounded-full mb-4">
+                  <div className="inline-flex items-center justify-center w-20 h-20 bg-linear-to-br from-orange-600 to-red-600 rounded-full mb-4">
                     <span className="text-3xl">📱</span>
                   </div>
                   <h2 className="text-3xl font-bold text-gray-800 mb-2">
@@ -295,27 +372,71 @@ function DeliveryDashboard() {
                     <h3 className="text-lg font-semibold text-gray-800 mb-4">📦 Package Scanner</h3>
                     
                     <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">
-                          Package Token
-                        </label>
-                        <div className="flex gap-3">
-                          <input
-                            type="text"
-                            value={packageToken}
-                            onChange={(e) => setPackageToken(e.target.value)}
-                            className="flex-1 p-3 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none"
-                            placeholder="Enter or scan package token"
-                          />
+                      {/* Camera Scanner */}
+                      {!showCamera && (
+                        <div className="text-center">
                           <button
-                            onClick={handleScanPackage}
-                            disabled={isScanning}
-                            className="px-6 py-3 bg-orange-600 text-white rounded-lg font-semibold hover:bg-orange-700 transition-colors disabled:opacity-50"
+                            onClick={startCameraScanner}
+                            className="w-full py-4 bg-linear-to-br from-blue-600 to-indigo-600 text-white rounded-lg font-bold text-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-lg flex items-center justify-center gap-3"
                           >
-                            {isScanning ? 'Scanning...' : 'Scan'}
+                            <span className="text-2xl">📷</span>
+                            Open Camera to Scan QR
                           </button>
                         </div>
-                      </div>
+                      )}
+
+                      {/* Camera View */}
+                      {showCamera && (
+                        <div className="space-y-3">
+                          <div className="p-4 bg-blue-50 border border-blue-300 rounded-lg">
+                            <p className="text-sm text-blue-800 mb-2">
+                              📷 <strong>To start camera:</strong>
+                            </p>
+                            <ol className="text-xs text-blue-700 space-y-1 ml-4">
+                              <li>1. Click "Request Camera Permissions" button below</li>
+                              <li>2. Browser will ask for permission</li>
+                              <li>3. Click "Allow" to start camera</li>
+                              <li>4. Or click "Scan an Image File" to upload QR image</li>
+                            </ol>
+                          </div>
+                          <div 
+                            id="qr-reader" 
+                            ref={scannerRef}
+                            className="rounded-lg overflow-hidden border-2 border-blue-500"
+                          ></div>
+                          <button
+                            onClick={stopCameraScanner}
+                            className="w-full py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors"
+                          >
+                            Close Camera
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Manual Entry */}
+                      {!showCamera && (
+                        <div>
+                          <div className="text-center text-sm text-gray-500 mb-2">
+                            Or enter manually
+                          </div>
+                          <div className="flex gap-3">
+                            <input
+                              type="text"
+                              value={packageToken}
+                              onChange={(e) => setPackageToken(e.target.value)}
+                              className="flex-1 p-3 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none"
+                              placeholder="Paste QR JSON or token"
+                            />
+                            <button
+                              onClick={handleScanPackage}
+                              disabled={isScanning}
+                              className="px-6 py-3 bg-orange-600 text-white rounded-lg font-semibold hover:bg-orange-700 transition-colors disabled:opacity-50"
+                            >
+                              {isScanning ? 'Scanning...' : 'Scan'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Package Info */}
                       {packageData && (
@@ -418,7 +539,7 @@ function DeliveryDashboard() {
                           <button
                             onClick={() => handleUploadScan('proceed')}
                             disabled={isSubmitting}
-                            className="w-full py-4 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-lg font-bold text-lg hover:from-green-700 hover:to-green-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                            className="w-full py-4 bg-linear-to-br from-green-600 to-green-700 text-white rounded-lg font-bold text-lg hover:from-green-700 hover:to-green-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
                           >
                             {isSubmitting ? '⏳ Uploading...' : '✅ Upload & Proceed'}
                           </button>
@@ -426,7 +547,7 @@ function DeliveryDashboard() {
                           <button
                             onClick={() => handleUploadScan('return')}
                             disabled={isSubmitting}
-                            className="w-full py-4 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg font-bold text-lg hover:from-red-700 hover:to-red-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                            className="w-full py-4 bg-linear-to-br from-red-600 to-red-700 text-white rounded-lg font-bold text-lg hover:from-red-700 hover:to-red-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
                           >
                             {isSubmitting ? '⏳ Uploading...' : '🚨 Upload & Return to Sender'}
                           </button>
