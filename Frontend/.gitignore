@@ -55,3 +55,5 @@ backend/.env
 
 node_modules/
 .vite/
+
+__pycache__/
