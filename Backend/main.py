@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
+from typing import Optional
 import os
 import jwt
 import bcrypt
@@ -72,8 +73,8 @@ class UserRegistration(BaseModel):
     email: str
     password: str
     role: str  # "sender", "receiver", "delivery"
-    phone: str = None
-    company_name: str = None
+    phone: Optional[str] = None
+    company_name: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: str
@@ -84,8 +85,8 @@ class UserResponse(BaseModel):
     username: str
     email: str
     role: str
-    phone: str = None
-    company_name: str = None
+    phone: Optional[str] = None
+    company_name: Optional[str] = None
 
 # --- JWT Helper Functions ---
 def create_access_token(data: dict):

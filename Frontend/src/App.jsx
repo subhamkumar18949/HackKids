@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom'
 import LandingPage from './pages/LandingPage'
 import AuthForm from './pages/AuthForm'
+import ReceiverScanner from './pages/ReceiverScanner'
 import ScanPage from './pages/ScanPage'
 import Dashboard from './pages/Dashboard'
 
@@ -24,14 +25,7 @@ function App() {
           </div>
         } />
         
-        <Route path="/receiver/scanner" element={
-          <div className="min-h-screen bg-gradient-to-br from-purple-50 to-purple-100 flex items-center justify-center">
-            <div className="text-center">
-              <h1 className="text-4xl font-bold text-purple-800 mb-4">📱 Receiver Scanner</h1>
-              <p className="text-purple-600">Scan QR codes, verify packages, enter PINs</p>
-            </div>
-          </div>
-        } />
+        <Route path="/receiver/scanner" element={<ReceiverScanner />} />
         
         <Route path="/delivery/dashboard" element={
           <div className="min-h-screen bg-gradient-to-br from-orange-50 to-orange-100 flex items-center justify-center">
