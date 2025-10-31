@@ -3,12 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import os
 import jwt
 import bcrypt
+import secrets
+import string
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from bson import ObjectId
 
 # Load environment variables from .env file
 load_dotenv()
@@ -87,6 +90,39 @@ class UserResponse(BaseModel):
     role: str
     phone: Optional[str] = None
     company_name: Optional[str] = None
+
+# --- Package & Checkpoint Models ---
+class ESP32Data(BaseModel):
+    temperature: float
+    humidity: Optional[float] = None
+    tamper_status: str  # "secure", "tampered"
+    battery_level: int
+    shock_detected: bool = False
+    gps_location: Optional[str] = None
+
+class CheckpointData(BaseModel):
+    checkpoint_id: str
+    name: str
+    location: str
+    scanned_by: str  # delivery user ID
+    esp32_data: ESP32Data
+    status: str  # "passed", "failed", "pending"
+    notes: Optional[str] = None
+
+class PackageCreation(BaseModel):
+    order_id: str
+    package_type: str
+    receiver_phone: str
+    device_id: str
+    sender_id: str
+    notes: Optional[str] = None
+
+class CheckpointScan(BaseModel):
+    package_token: str
+    checkpoint_id: str
+    esp32_data: ESP32Data
+    status: str
+    notes: Optional[str] = None
 
 # --- JWT Helper Functions ---
 def create_access_token(data: dict):
@@ -280,3 +316,236 @@ async def get_dashboard_data():
         seal["_id"] = str(seal["_id"]) # Convert ObjectId to string for JSON
         seals.append(seal)
     return seals
+
+# --- Package Management Endpoints ---
+
+@app.post("/packages/create")
+async def create_package(package_data: PackageCreation, token_data: dict = Depends(verify_token)):
+    """
+    Create a new package with tracking capabilities
+    """
+    try:
+        # Generate unique package token
+        package_token = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
+        package_id = f"PKG{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        # Generate PIN for customer
+        pin = ''.join(secrets.choice(string.digits) for _ in range(6))
+        
+        # Create package document
+        package_doc = {
+            "package_id": package_id,
+            "package_token": package_token,
+            "order_id": package_data.order_id,
+            "package_type": package_data.package_type,
+            "device_id": package_data.device_id,
+            "sender_id": package_data.sender_id,
+            "receiver_phone": package_data.receiver_phone,
+            "pin": pin,
+            "authenticated": False,
+            
+            # Current status
+            "current_status": "created",
+            "current_checkpoint": None,
+            "current_location": "Warehouse",
+            
+            # Checkpoint journey
+            "checkpoints": [],
+            
+            # Timestamps
+            "created_at": datetime.now(),
+            "updated_at": datetime.now(),
+            
+            # Additional info
+            "notes": package_data.notes
+        }
+        
+        # Insert package
+        result = await app.mongodb.packages.insert_one(package_doc)
+        
+        # Mock SMS sending
+        print(f"📱 SMS to {package_data.receiver_phone}: Your VeriSeal PIN is {pin}")
+        
+        return {
+            "package_id": package_id,
+            "package_token": package_token,
+            "pin": pin,  # For demo purposes
+            "qr_url": f"https://veriseal.app/scan?token={package_token}",
+            "message": "Package created successfully"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/delivery/scan-checkpoint")
+async def scan_checkpoint(checkpoint_data: CheckpointScan, token_data: dict = Depends(require_role("delivery"))):
+    """
+    Scan package at checkpoint and update journey
+    """
+    try:
+        package = await app.mongodb.packages.find_one({"package_token": checkpoint_data.package_token})
+        
+        if not package:
+            raise HTTPException(status_code=404, detail="Package not found")
+        
+        # Create checkpoint entry
+        checkpoint_entry = {
+            "checkpoint_id": checkpoint_data.checkpoint_id,
+            "name": get_checkpoint_name(checkpoint_data.checkpoint_id),
+            "location": get_checkpoint_location(checkpoint_data.checkpoint_id),
+            "scanned_by": token_data["sub"],  # delivery user ID
+            "scanned_at": datetime.now(),
+            "esp32_data": checkpoint_data.esp32_data.dict(),
+            "status": checkpoint_data.status,
+            "notes": checkpoint_data.notes
+        }
+        
+        # Update package with new checkpoint
+        update_data = {
+            "$push": {"checkpoints": checkpoint_entry},
+            "$set": {
+                "current_checkpoint": checkpoint_data.checkpoint_id,
+                "current_location": get_checkpoint_location(checkpoint_data.checkpoint_id),
+                "current_status": "at_checkpoint" if checkpoint_data.status == "passed" else "checkpoint_failed",
+                "updated_at": datetime.now()
+            }
+        }
+        
+        await app.mongodb.packages.update_one(
+            {"package_token": checkpoint_data.package_token},
+            update_data
+        )
+        
+        return {
+            "message": "Checkpoint scan recorded successfully",
+            "checkpoint_id": checkpoint_data.checkpoint_id,
+            "status": checkpoint_data.status,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- Helper Functions ---
+
+def get_checkpoint_name(checkpoint_id: str) -> str:
+    """Get checkpoint name from ID"""
+    checkpoint_names = {
+        "CP001": "Warehouse Dispatch",
+        "CP002": "Local Hub",
+        "CP003": "Transit Hub", 
+        "CP004": "Destination Hub",
+        "CP005": "Out for Delivery",
+        "CP006": "Delivered"
+    }
+    return checkpoint_names.get(checkpoint_id, f"Checkpoint {checkpoint_id}")
+
+def get_checkpoint_location(checkpoint_id: str) -> str:
+    """Get checkpoint location from ID"""
+    checkpoint_locations = {
+        "CP001": "Mumbai Warehouse",
+        "CP002": "Mumbai Central Hub",
+        "CP003": "Delhi Transit Hub",
+        "CP004": "Bangalore Hub", 
+        "CP005": "Local Delivery Center",
+        "CP006": "Customer Location"
+    }
+    return checkpoint_locations.get(checkpoint_id, f"Location {checkpoint_id}")
+
+@app.get("/delivery/packages")
+async def get_delivery_packages(checkpoint_id: str = None, token_data: dict = Depends(require_role("delivery"))):
+    """
+    Get packages for delivery dashboard
+    """
+    try:
+        query = {}
+        if checkpoint_id:
+            query["current_checkpoint"] = checkpoint_id
+        
+        packages = []
+        cursor = app.mongodb.packages.find(query).sort("updated_at", -1)
+        
+        async for package in cursor:
+            package["_id"] = str(package["_id"])
+            packages.append({
+                "package_id": package["package_id"],
+                "order_id": package["order_id"],
+                "package_type": package["package_type"],
+                "current_status": package["current_status"],
+                "current_location": package["current_location"],
+                "current_checkpoint": package.get("current_checkpoint"),
+                "updated_at": package["updated_at"].isoformat(),
+                "checkpoints_count": len(package.get("checkpoints", []))
+            })
+        
+        return packages
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/sender/packages")
+async def get_sender_packages(token_data: dict = Depends(require_role("sender"))):
+    """
+    Get all packages for sender dashboard
+    """
+    try:
+        sender_id = token_data["sub"]
+        
+        packages = []
+        cursor = app.mongodb.packages.find({"sender_id": sender_id}).sort("created_at", -1)
+        
+        async for package in cursor:
+            package["_id"] = str(package["_id"])
+            
+            # Get latest ESP32 data
+            latest_esp32_data = None
+            if package.get("checkpoints"):
+                latest_checkpoint = package["checkpoints"][-1]
+                latest_esp32_data = latest_checkpoint.get("esp32_data")
+            
+            packages.append({
+                "package_id": package["package_id"],
+                "order_id": package["order_id"],
+                "package_type": package["package_type"],
+                "device_id": package["device_id"],
+                "current_status": package["current_status"],
+                "current_location": package["current_location"],
+                "current_checkpoint": package.get("current_checkpoint"),
+                "checkpoints_count": len(package.get("checkpoints", [])),
+                "latest_esp32_data": latest_esp32_data,
+                "created_at": package["created_at"].isoformat(),
+                "updated_at": package["updated_at"].isoformat()
+            })
+        
+        return packages
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/sender/package/{package_id}/journey")
+async def get_package_journey(package_id: str, token_data: dict = Depends(require_role("sender"))):
+    """
+    Get detailed checkpoint journey for a package
+    """
+    try:
+        package = await app.mongodb.packages.find_one({"package_id": package_id, "sender_id": token_data["sub"]})
+        
+        if not package:
+            raise HTTPException(status_code=404, detail="Package not found")
+        
+        return {
+            "package_id": package["package_id"],
+            "order_id": package["order_id"],
+            "current_status": package["current_status"],
+            "current_location": package["current_location"],
+            "checkpoints": package.get("checkpoints", []),
+            "created_at": package["created_at"].isoformat(),
+            "updated_at": package["updated_at"].isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
