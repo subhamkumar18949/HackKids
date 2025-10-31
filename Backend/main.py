@@ -454,6 +454,360 @@ def get_checkpoint_location(checkpoint_id: str) -> str:
     }
     return checkpoint_locations.get(checkpoint_id, f"Location {checkpoint_id}")
 
+# --- Mock Data for Demo ---
+
+@app.post("/demo/create-mock-data")
+async def create_mock_data():
+    """
+    Create mock packages with checkpoint journeys for demo
+    """
+    try:
+        # Clear existing packages for demo
+        await app.mongodb.packages.delete_many({})
+        
+        mock_packages = [
+            {
+                "package_id": "PKG20251031001",
+                "package_token": "demo_token_electronics_001",
+                "order_id": "ORD12345",
+                "package_type": "electronics",
+                "device_id": "DEV001",
+                "sender_id": "sender_demo_001",
+                "receiver_phone": "+91 98765 43210",
+                "pin": "123456",
+                "authenticated": False,
+                "current_status": "at_checkpoint",
+                "current_checkpoint": "CP003",
+                "current_location": "Delhi Transit Hub",
+                "checkpoints": [
+                    {
+                        "checkpoint_id": "CP001",
+                        "name": "Warehouse Dispatch",
+                        "location": "Mumbai Warehouse",
+                        "scanned_by": "delivery_user_001",
+                        "scanned_at": datetime(2025, 10, 31, 9, 30, 0),
+                        "esp32_data": {
+                            "temperature": 22.5,
+                            "humidity": 45.0,
+                            "tamper_status": "secure",
+                            "battery_level": 95,
+                            "shock_detected": False,
+                            "gps_location": "19.0760,72.8777"
+                        },
+                        "status": "passed",
+                        "notes": "Package dispatched successfully"
+                    },
+                    {
+                        "checkpoint_id": "CP002",
+                        "name": "Local Hub",
+                        "location": "Mumbai Central Hub",
+                        "scanned_by": "delivery_user_002",
+                        "scanned_at": datetime(2025, 10, 31, 12, 15, 0),
+                        "esp32_data": {
+                            "temperature": 24.1,
+                            "humidity": 48.0,
+                            "tamper_status": "secure",
+                            "battery_level": 88,
+                            "shock_detected": False,
+                            "gps_location": "19.0760,72.8777"
+                        },
+                        "status": "passed",
+                        "notes": "Sorted and loaded for transit"
+                    },
+                    {
+                        "checkpoint_id": "CP003",
+                        "name": "Transit Hub",
+                        "location": "Delhi Transit Hub",
+                        "scanned_by": "delivery_user_003",
+                        "scanned_at": datetime(2025, 10, 31, 18, 45, 0),
+                        "esp32_data": {
+                            "temperature": 26.8,
+                            "humidity": 52.0,
+                            "tamper_status": "secure",
+                            "battery_level": 82,
+                            "shock_detected": False,
+                            "gps_location": "28.7041,77.1025"
+                        },
+                        "status": "passed",
+                        "notes": "Arrived at transit hub"
+                    }
+                ],
+                "created_at": datetime(2025, 10, 31, 9, 0, 0),
+                "updated_at": datetime(2025, 10, 31, 18, 45, 0),
+                "notes": "High-value electronics package"
+            },
+            {
+                "package_id": "PKG20251031002",
+                "package_token": "demo_token_jewelry_002",
+                "order_id": "ORD12346",
+                "package_type": "jewelry",
+                "device_id": "DEV002",
+                "sender_id": "sender_demo_001",
+                "receiver_phone": "+91 98765 43211",
+                "pin": "654321",
+                "authenticated": True,
+                "current_status": "delivered",
+                "current_checkpoint": "CP006",
+                "current_location": "Customer Location",
+                "checkpoints": [
+                    {
+                        "checkpoint_id": "CP001",
+                        "name": "Warehouse Dispatch",
+                        "location": "Mumbai Warehouse",
+                        "scanned_by": "delivery_user_001",
+                        "scanned_at": datetime(2025, 10, 30, 10, 0, 0),
+                        "esp32_data": {
+                            "temperature": 21.8,
+                            "humidity": 42.0,
+                            "tamper_status": "secure",
+                            "battery_level": 98,
+                            "shock_detected": False,
+                            "gps_location": "19.0760,72.8777"
+                        },
+                        "status": "passed",
+                        "notes": "High-security jewelry package"
+                    },
+                    {
+                        "checkpoint_id": "CP002",
+                        "name": "Local Hub",
+                        "location": "Mumbai Central Hub",
+                        "scanned_by": "delivery_user_002",
+                        "scanned_at": datetime(2025, 10, 30, 14, 30, 0),
+                        "esp32_data": {
+                            "temperature": 23.2,
+                            "humidity": 46.0,
+                            "tamper_status": "secure",
+                            "battery_level": 92,
+                            "shock_detected": False,
+                            "gps_location": "19.0760,72.8777"
+                        },
+                        "status": "passed",
+                        "notes": "Special handling applied"
+                    },
+                    {
+                        "checkpoint_id": "CP005",
+                        "name": "Out for Delivery",
+                        "location": "Local Delivery Center",
+                        "scanned_by": "delivery_user_005",
+                        "scanned_at": datetime(2025, 10, 31, 8, 0, 0),
+                        "esp32_data": {
+                            "temperature": 25.5,
+                            "humidity": 50.0,
+                            "tamper_status": "secure",
+                            "battery_level": 85,
+                            "shock_detected": False,
+                            "gps_location": "12.9716,77.5946"
+                        },
+                        "status": "passed",
+                        "notes": "Out for final delivery"
+                    },
+                    {
+                        "checkpoint_id": "CP006",
+                        "name": "Delivered",
+                        "location": "Customer Location",
+                        "scanned_by": "delivery_user_005",
+                        "scanned_at": datetime(2025, 10, 31, 11, 30, 0),
+                        "esp32_data": {
+                            "temperature": 24.8,
+                            "humidity": 48.0,
+                            "tamper_status": "secure",
+                            "battery_level": 83,
+                            "shock_detected": False,
+                            "gps_location": "12.9716,77.5946"
+                        },
+                        "status": "passed",
+                        "notes": "Successfully delivered to customer"
+                    }
+                ],
+                "created_at": datetime(2025, 10, 30, 9, 30, 0),
+                "updated_at": datetime(2025, 10, 31, 11, 30, 0),
+                "notes": "Premium jewelry with enhanced security"
+            },
+            {
+                "package_id": "PKG20251031003",
+                "package_token": "demo_token_tampered_003",
+                "order_id": "ORD12347",
+                "package_type": "electronics",
+                "device_id": "DEV003",
+                "sender_id": "sender_demo_001",
+                "receiver_phone": "+91 98765 43212",
+                "pin": "789012",
+                "authenticated": False,
+                "current_status": "checkpoint_failed",
+                "current_checkpoint": "CP002",
+                "current_location": "Mumbai Central Hub",
+                "checkpoints": [
+                    {
+                        "checkpoint_id": "CP001",
+                        "name": "Warehouse Dispatch",
+                        "location": "Mumbai Warehouse",
+                        "scanned_by": "delivery_user_001",
+                        "scanned_at": datetime(2025, 10, 31, 8, 0, 0),
+                        "esp32_data": {
+                            "temperature": 22.0,
+                            "humidity": 44.0,
+                            "tamper_status": "secure",
+                            "battery_level": 94,
+                            "shock_detected": False,
+                            "gps_location": "19.0760,72.8777"
+                        },
+                        "status": "passed",
+                        "notes": "Initial dispatch successful"
+                    },
+                    {
+                        "checkpoint_id": "CP002",
+                        "name": "Local Hub",
+                        "location": "Mumbai Central Hub",
+                        "scanned_by": "delivery_user_002",
+                        "scanned_at": datetime(2025, 10, 31, 13, 20, 0),
+                        "esp32_data": {
+                            "temperature": 28.5,
+                            "humidity": 55.0,
+                            "tamper_status": "tampered",
+                            "battery_level": 89,
+                            "shock_detected": True,
+                            "gps_location": "19.0760,72.8777"
+                        },
+                        "status": "failed",
+                        "notes": "⚠️ SECURITY ALERT: Tamper detected! Package shows signs of unauthorized access."
+                    }
+                ],
+                "created_at": datetime(2025, 10, 31, 7, 45, 0),
+                "updated_at": datetime(2025, 10, 31, 13, 20, 0),
+                "notes": "SECURITY INCIDENT - Investigation required"
+            },
+            {
+                "package_id": "PKG20251031004",
+                "package_token": "demo_token_fashion_004",
+                "order_id": "ORD12348",
+                "package_type": "fashion",
+                "device_id": "DEV004",
+                "sender_id": "sender_demo_001",
+                "receiver_phone": "+91 98765 43213",
+                "pin": "456789",
+                "authenticated": False,
+                "current_status": "created",
+                "current_checkpoint": None,
+                "current_location": "Warehouse",
+                "checkpoints": [],
+                "created_at": datetime(2025, 10, 31, 19, 0, 0),
+                "updated_at": datetime(2025, 10, 31, 19, 0, 0),
+                "notes": "Fashion package ready for dispatch"
+            },
+            {
+                "package_id": "PKG20251031005",
+                "package_token": "demo_token_gaming_005",
+                "order_id": "ORD12349",
+                "package_type": "gaming",
+                "device_id": "DEV005",
+                "sender_id": "sender_demo_001",
+                "receiver_phone": "+91 98765 43214",
+                "pin": "321654",
+                "authenticated": False,
+                "current_status": "at_checkpoint",
+                "current_checkpoint": "CP005",
+                "current_location": "Local Delivery Center",
+                "checkpoints": [
+                    {
+                        "checkpoint_id": "CP001",
+                        "name": "Warehouse Dispatch",
+                        "location": "Mumbai Warehouse",
+                        "scanned_by": "delivery_user_001",
+                        "scanned_at": datetime(2025, 10, 30, 16, 0, 0),
+                        "esp32_data": {
+                            "temperature": 23.1,
+                            "humidity": 47.0,
+                            "tamper_status": "secure",
+                            "battery_level": 96,
+                            "shock_detected": False,
+                            "gps_location": "19.0760,72.8777"
+                        },
+                        "status": "passed",
+                        "notes": "Gaming console package"
+                    },
+                    {
+                        "checkpoint_id": "CP002",
+                        "name": "Local Hub",
+                        "location": "Mumbai Central Hub",
+                        "scanned_by": "delivery_user_002",
+                        "scanned_at": datetime(2025, 10, 30, 20, 15, 0),
+                        "esp32_data": {
+                            "temperature": 24.8,
+                            "humidity": 49.0,
+                            "tamper_status": "secure",
+                            "battery_level": 91,
+                            "shock_detected": False,
+                            "gps_location": "19.0760,72.8777"
+                        },
+                        "status": "passed",
+                        "notes": "Fragile handling applied"
+                    },
+                    {
+                        "checkpoint_id": "CP004",
+                        "name": "Destination Hub",
+                        "location": "Bangalore Hub",
+                        "scanned_by": "delivery_user_004",
+                        "scanned_at": datetime(2025, 10, 31, 6, 30, 0),
+                        "esp32_data": {
+                            "temperature": 26.2,
+                            "humidity": 51.0,
+                            "tamper_status": "secure",
+                            "battery_level": 87,
+                            "shock_detected": False,
+                            "gps_location": "12.9716,77.5946"
+                        },
+                        "status": "passed",
+                        "notes": "Arrived at destination city"
+                    },
+                    {
+                        "checkpoint_id": "CP005",
+                        "name": "Out for Delivery",
+                        "location": "Local Delivery Center",
+                        "scanned_by": "delivery_user_005",
+                        "scanned_at": datetime(2025, 10, 31, 9, 45, 0),
+                        "esp32_data": {
+                            "temperature": 25.9,
+                            "humidity": 50.0,
+                            "tamper_status": "secure",
+                            "battery_level": 84,
+                            "shock_detected": False,
+                            "gps_location": "12.9716,77.5946"
+                        },
+                        "status": "passed",
+                        "notes": "Loaded for final delivery"
+                    }
+                ],
+                "created_at": datetime(2025, 10, 30, 15, 30, 0),
+                "updated_at": datetime(2025, 10, 31, 9, 45, 0),
+                "notes": "Gaming console - handle with care"
+            }
+        ]
+        
+        # Insert mock packages
+        await app.mongodb.packages.insert_many(mock_packages)
+        
+        return {
+            "message": "Mock data created successfully",
+            "packages_created": len(mock_packages),
+            "demo_tokens": [
+                "demo_token_electronics_001",
+                "demo_token_jewelry_002", 
+                "demo_token_tampered_003",
+                "demo_token_fashion_004",
+                "demo_token_gaming_005"
+            ],
+            "demo_pins": [
+                "123456",
+                "654321",
+                "789012", 
+                "456789",
+                "321654"
+            ]
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/delivery/packages")
 async def get_delivery_packages(checkpoint_id: str = None, token_data: dict = Depends(require_role("delivery"))):
     """
