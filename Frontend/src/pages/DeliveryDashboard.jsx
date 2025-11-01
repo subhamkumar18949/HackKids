@@ -110,6 +110,19 @@ function DeliveryDashboard() {
           acceleration: parsedQR.acceleration || 0.0
         });
         setQrData(parsedQR);
+      } else {
+        // If no sensor data in QR, set default demo data
+        console.log('📊 No sensor data in QR, using demo data');
+        setEsp32Data({
+          temperature: 22.5,
+          humidity: 45,
+          tamper_status: 'secure',
+          battery_level: 85,
+          shock_detected: false,
+          gps_location: '',
+          loop_connected: true,
+          acceleration: 9.81
+        });
       }
       
       // FOR DEMO: If scanned data doesn't look like a package token, use demo token

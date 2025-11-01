@@ -9,6 +9,7 @@ import jwt
 import bcrypt
 import secrets
 import string
+import random
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from bson import ObjectId
@@ -514,7 +515,11 @@ async def create_package(package_data: PackageCreation, token_data: dict = Depen
     """
     try:
         # Get sender info
-        sender = await app.mongodb.users.find_one({"_id": token_data["sub"]})
+        sender = await app.mongodb.users.find_one({"_id": ObjectId(token_data["sub"])})
+        
+        if not sender:
+            raise HTTPException(status_code=404, detail="Sender not found")
+        
         sender_username = sender["username"]
         
         # Use device_id as package_id since each ESP32 has a fixed QR code
