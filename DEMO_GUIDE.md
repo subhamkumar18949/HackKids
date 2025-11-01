@@ -1,6 +1,8 @@
-# 🎯 VeriSeal Hackathon Demo Guide
+# VeriSeal Demo Guide - Simplified for Hackathon
 
-## 🚀 Quick Setup
+## Demo Flow (Without package_token in ESP32)
+
+## Quick Setup
 
 1. **Start Backend:**
    ```bash

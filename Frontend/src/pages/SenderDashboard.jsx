@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 function SenderDashboard() {
   const navigate = useNavigate();
@@ -8,12 +9,13 @@ function SenderDashboard() {
   
   // Dashboard state
   const [stats, setStats] = useState({
-    activeDevices: 12,
-    offlineDevices: 2,
-    packagesInTransit: 45,
-    tamperAlerts: 3,
-    todayShipments: 28
+    activeDevices: 0,
+    offlineDevices: 0,
+    packagesInTransit: 0,
+    tamperAlerts: 0,
+    todayShipments: 0
   });
+  const [isLoadingStats, setIsLoadingStats] = useState(true);
 
   // Package creation state
   const [newPackage, setNewPackage] = useState({
@@ -25,64 +27,205 @@ function SenderDashboard() {
   });
   const [isCreatingPackage, setIsCreatingPackage] = useState(false);
   const [createdPackage, setCreatedPackage] = useState(null);
+  const [showQRScanner, setShowQRScanner] = useState(false);
+  const [scannerError, setScannerError] = useState(null);
+  const qrScannerRef = useRef(null);
 
   // Device management state
-  const [devices, setDevices] = useState([
-    { id: 'DEV001', status: 'available', battery: 95, lastSeen: '2 min ago' },
-    { id: 'DEV002', status: 'deployed', battery: 78, lastSeen: '5 min ago', orderId: 'ORD12345' },
-    { id: 'DEV003', status: 'available', battery: 88, lastSeen: '1 min ago' },
-    { id: 'DEV004', status: 'deployed', battery: 45, lastSeen: '10 min ago', orderId: 'ORD12346' },
-    { id: 'DEV005', status: 'offline', battery: 12, lastSeen: '2 hours ago' }
-  ]);
+  const [devices, setDevices] = useState([]);
+  const [isLoadingDevices, setIsLoadingDevices] = useState(true);
+
+  // Transit report state
+  const [selectedPackageId, setSelectedPackageId] = useState(null);
+  const [transitReport, setTransitReport] = useState(null);
+  const [isLoadingReport, setIsLoadingReport] = useState(false);
 
   // Live packages state
-  const [livePackages, setLivePackages] = useState([
-    {
-      id: 'PKG001',
-      orderId: 'ORD12345',
-      type: 'Electronics',
-      deviceId: 'DEV002',
-      status: 'in_transit',
-      customer: '+91 98765 43210',
-      temperature: '22°C',
-      tamperStatus: 'secure',
-      location: 'Mumbai Central',
-      createdAt: '2 hours ago'
-    },
-    {
-      id: 'PKG002',
-      orderId: 'ORD12346',
-      type: 'Jewelry',
-      deviceId: 'DEV004',
-      status: 'delivered',
-      customer: '+91 98765 43211',
-      temperature: '25°C',
-      tamperStatus: 'secure',
-      location: 'Delivered',
-      createdAt: '5 hours ago'
-    }
-  ]);
+  const [livePackages, setLivePackages] = useState([]);
+  const [isLoadingPackages, setIsLoadingPackages] = useState(true);
 
   // Alerts state
-  const [alerts, setAlerts] = useState([
-    { id: 1, type: 'tamper', message: 'Package PKG003 tamper detected', time: '10 min ago', severity: 'high' },
-    { id: 2, type: 'battery', message: 'Device DEV005 low battery (12%)', time: '30 min ago', severity: 'medium' },
-    { id: 3, type: 'delivery', message: 'Package PKG002 delivered successfully', time: '1 hour ago', severity: 'low' }
-  ]);
+  const [alerts, setAlerts] = useState([]);
+  const [isLoadingAlerts, setIsLoadingAlerts] = useState(true);
 
   useEffect(() => {
-    // Get user from localStorage
+    // Check authentication
+    const token = localStorage.getItem('access_token');
     const userData = localStorage.getItem('user');
-    if (userData) {
-      setUser(JSON.parse(userData));
-      loadLivePackages();
-    } else {
-      navigate('/auth/sender?mode=login');
+    
+    if (!token || !userData) {
+      navigate('/login');
       return;
     }
+
+    const parsedUser = JSON.parse(userData);
+    if (parsedUser.role !== 'sender') {
+      navigate('/login');
+      return;
+    }
+
+    setUser(parsedUser);
+    
+    // Load all real data from backend
+    loadLivePackages();
+    loadDashboardStats();
+    loadDevices();
+    loadAlerts();
   }, [navigate]);
 
+  const loadDashboardStats = async () => {
+    setIsLoadingStats(true);
+    try {
+      const response = await fetch('http://127.0.0.1:8000/sender/packages', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const packages = data.packages || [];
+        
+        // Calculate real stats from packages
+        const inTransit = packages.filter(pkg => 
+          pkg.current_status !== 'delivered' && pkg.current_status !== 'cancelled'
+        ).length;
+        
+        const tampered = packages.filter(pkg => pkg.is_tampered).length;
+        
+        const today = new Date().toDateString();
+        const todayShipments = packages.filter(pkg => 
+          new Date(pkg.created_at).toDateString() === today
+        ).length;
+        
+        setStats({
+          activeDevices: devices.filter(d => d.status === 'available' || d.status === 'deployed').length,
+          offlineDevices: devices.filter(d => d.status === 'offline').length,
+          packagesInTransit: inTransit,
+          tamperAlerts: tampered,
+          todayShipments: todayShipments
+        });
+      }
+    } catch (error) {
+      console.error('Error loading stats:', error);
+    } finally {
+      setIsLoadingStats(false);
+    }
+  };
+
+  const loadDevices = async () => {
+    setIsLoadingDevices(true);
+    try {
+      // For now, create devices based on packages or use a simple list
+      // You can add a backend endpoint later: /sender/devices
+      const response = await fetch('http://127.0.0.1:8000/sender/packages', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const packages = data.packages || [];
+        
+        // Extract unique devices from packages
+        const deviceMap = new Map();
+        packages.forEach(pkg => {
+          if (!deviceMap.has(pkg.device_id)) {
+            deviceMap.set(pkg.device_id, {
+              id: pkg.device_id,
+              status: pkg.current_status === 'delivered' ? 'available' : 'deployed',
+              battery: 85, // Default value since we don't have real battery data yet
+              lastSeen: 'Active',
+              orderId: pkg.current_status !== 'delivered' ? pkg.order_id : null
+            });
+          }
+        });
+        
+        // Add some available devices for demo
+        for (let i = 1; i <= 5; i++) {
+          const devId = `DEV${String(i).padStart(3, '0')}`;
+          if (!deviceMap.has(devId)) {
+            deviceMap.set(devId, {
+              id: devId,
+              status: 'available',
+              battery: 90 + Math.floor(Math.random() * 10),
+              lastSeen: 'Ready',
+              orderId: null
+            });
+          }
+        }
+        
+        setDevices(Array.from(deviceMap.values()));
+      }
+    } catch (error) {
+      console.error('Error loading devices:', error);
+    } finally {
+      setIsLoadingDevices(false);
+    }
+  };
+
+  const loadAlerts = async () => {
+    setIsLoadingAlerts(true);
+    try {
+      const response = await fetch('http://127.0.0.1:8000/sender/packages', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const packages = data.packages || [];
+        
+        // Generate alerts from real package data
+        const alertsList = [];
+        let alertId = 1;
+        
+        packages.forEach(pkg => {
+          // Tamper alerts
+          if (pkg.is_tampered && pkg.tamper_count > 0) {
+            alertsList.push({
+              id: alertId++,
+              severity: 'high',
+              message: `Tamper detected on ${pkg.package_id}`,
+              time: new Date(pkg.updated_at).toLocaleString()
+            });
+          }
+          
+          // Delivery alerts
+          if (pkg.current_status === 'delivered') {
+            alertsList.push({
+              id: alertId++,
+              severity: 'low',
+              message: `Package ${pkg.package_id} delivered successfully`,
+              time: new Date(pkg.updated_at).toLocaleString()
+            });
+          }
+          
+          // In transit alerts
+          if (pkg.current_status === 'in_transit') {
+            alertsList.push({
+              id: alertId++,
+              severity: 'medium',
+              message: `Package ${pkg.package_id} is in transit at ${pkg.current_location}`,
+              time: new Date(pkg.updated_at).toLocaleString()
+            });
+          }
+        });
+        
+        // Sort by most recent and take top 5
+        setAlerts(alertsList.slice(0, 5));
+      }
+    } catch (error) {
+      console.error('Error loading alerts:', error);
+    } finally {
+      setIsLoadingAlerts(false);
+    }
+  };
+
   const loadLivePackages = async () => {
+    setIsLoadingPackages(true);
     try {
       const response = await fetch('http://127.0.0.1:8000/sender/packages', {
         headers: {
@@ -103,11 +246,114 @@ function SenderDashboard() {
           tamperStatus: pkg.latest_esp32_data?.tamper_status || 'unknown',
           location: pkg.current_location,
           createdAt: new Date(pkg.created_at).toLocaleString(),
-          checkpointsCount: pkg.checkpoints_count
+          checkpointsCount: pkg.checkpoints_count,
+          isTampered: pkg.is_tampered
         })));
       }
     } catch (error) {
       console.error('Error loading packages:', error);
+    } finally {
+      setIsLoadingPackages(false);
+    }
+  };
+
+  const startQRScanner = () => {
+    setShowQRScanner(true);
+    setScannerError(null);
+    
+    // Initialize scanner after DOM is ready
+    setTimeout(() => {
+      if (!qrScannerRef.current) {
+        qrScannerRef.current = new Html5QrcodeScanner(
+          "qr-reader-create",
+          { 
+            fps: 20,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0,
+            rememberLastUsedCamera: true
+          },
+          false
+        );
+        
+        qrScannerRef.current.render(
+          (decodedText) => {
+            console.log("QR Code detected:", decodedText);
+            
+            // Extract device_id from QR code
+            let deviceId = decodedText.trim();
+            
+            // Handle different QR formats
+            if (decodedText.includes('device/')) {
+              deviceId = decodedText.split('device/')[1].trim();
+            } else if (decodedText.includes('://')) {
+              const parts = decodedText.split('/');
+              deviceId = parts[parts.length - 1].trim();
+            }
+            
+            console.log("Extracted device ID:", deviceId);
+            
+            // Set device ID in form
+            setNewPackage(prev => ({ ...prev, deviceId: deviceId }));
+            
+            // Stop scanner
+            stopQRScanner();
+          },
+          (errorMessage) => {
+            // Ignore continuous scan errors
+          }
+        );
+      }
+    }, 300);
+  };
+
+  const stopQRScanner = () => {
+    try {
+      if (qrScannerRef.current) {
+        qrScannerRef.current.clear();
+        qrScannerRef.current = null;
+      }
+      setShowQRScanner(false);
+    } catch (err) {
+      console.error("Error stopping scanner:", err);
+      setShowQRScanner(false);
+    }
+  };
+
+  // Cleanup scanner on unmount
+  useEffect(() => {
+    return () => {
+      if (qrScannerRef.current) {
+        try {
+          qrScannerRef.current.clear();
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    };
+  }, []);
+
+  const loadTransitReport = async (packageId) => {
+    setIsLoadingReport(true);
+    setSelectedPackageId(packageId);
+    try {
+      const response = await fetch(`http://127.0.0.1:8000/sender/package/${packageId}/transit-report`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        }
+      });
+
+      if (response.ok) {
+        const report = await response.json();
+        setTransitReport(report);
+      } else {
+        console.error('Failed to load transit report');
+        setTransitReport(null);
+      }
+    } catch (error) {
+      console.error('Error loading transit report:', error);
+      setTransitReport(null);
+    } finally {
+      setIsLoadingReport(false);
     }
   };
 
@@ -143,12 +389,7 @@ function SenderDashboard() {
             : device
         ));
 
-        setCreatedPackage({
-          ...packageData,
-          id: packageData.package_id,
-          qrUrl: packageData.qr_url,
-          createdAt: new Date().toISOString()
-        });
+        setCreatedPackage(packageData);
         
         setNewPackage({
           orderId: '',
@@ -158,8 +399,11 @@ function SenderDashboard() {
           notes: ''
         });
 
-        // Refresh live packages
+        // Refresh all data
         loadLivePackages();
+        loadDashboardStats();
+        loadDevices();
+        loadAlerts();
       } else {
         const error = await response.json();
         console.error('Error creating package:', error);
@@ -172,9 +416,6 @@ function SenderDashboard() {
     }
   };
 
-  const generateQRCodeURL = (url) => {
-    return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`;
-  };
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -306,7 +547,8 @@ function SenderDashboard() {
                 { id: 'overview', label: 'Overview', icon: '📊' },
                 { id: 'create', label: 'Create Package', icon: '➕' },
                 { id: 'devices', label: 'Device Management', icon: '🔧' },
-                { id: 'live', label: 'Live Tracking', icon: '📍' }
+                { id: 'live', label: 'Live Tracking', icon: '📍' },
+                { id: 'reports', label: 'Transit Reports', icon: '📋' }
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -331,16 +573,27 @@ function SenderDashboard() {
                 {/* Recent Alerts */}
                 <div>
                   <h3 className="text-lg font-semibold text-gray-800 mb-4">Recent Alerts</h3>
-                  <div className="space-y-3">
-                    {alerts.map((alert) => (
-                      <div key={alert.id} className={`p-4 rounded-lg border ${getAlertColor(alert.severity)}`}>
-                        <div className="flex items-center justify-between">
-                          <p className="font-medium">{alert.message}</p>
-                          <span className="text-sm">{alert.time}</span>
+                  {isLoadingAlerts ? (
+                    <div className="text-center py-8">
+                      <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                      <p className="mt-2 text-gray-600">Loading alerts...</p>
+                    </div>
+                  ) : alerts.length > 0 ? (
+                    <div className="space-y-3">
+                      {alerts.map((alert) => (
+                        <div key={alert.id} className={`p-4 rounded-lg border ${getAlertColor(alert.severity)}`}>
+                          <div className="flex items-center justify-between">
+                            <p className="font-medium">{alert.message}</p>
+                            <span className="text-sm">{alert.time}</span>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      No alerts yet. All packages are secure! ✅
+                    </div>
+                  )}
                 </div>
 
                 {/* Quick Actions */}
@@ -436,19 +689,33 @@ function SenderDashboard() {
                         <label className="block text-sm font-semibold text-gray-700 mb-2">
                           Assign Device
                         </label>
-                        <select
-                          value={newPackage.deviceId}
-                          onChange={(e) => setNewPackage(prev => ({ ...prev, deviceId: e.target.value }))}
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
-                          required
-                        >
-                          <option value="">Select available device</option>
-                          {devices.filter(device => device.status === 'available').map(device => (
-                            <option key={device.id} value={device.id}>
-                              {device.id} (Battery: {device.battery}%)
-                            </option>
-                          ))}
-                        </select>
+                        <div className="flex gap-2">
+                          <select
+                            value={newPackage.deviceId}
+                            onChange={(e) => setNewPackage(prev => ({ ...prev, deviceId: e.target.value }))}
+                            className="flex-1 p-3 border border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
+                            required
+                          >
+                            <option value="">Select available device</option>
+                            {devices.filter(device => device.status === 'available').map(device => (
+                              <option key={device.id} value={device.id}>
+                                {device.id} (Battery: {device.battery}%)
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={startQRScanner}
+                            className="px-4 py-3 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center gap-2"
+                            title="Scan ESP32 QR Code"
+                          >
+                            <span>📷</span>
+                            <span className="hidden sm:inline">Scan QR</span>
+                          </button>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Select from list or scan the ESP32 device's QR code
+                        </p>
                       </div>
                     </div>
 
@@ -477,42 +744,77 @@ function SenderDashboard() {
                   <div className="bg-green-50 border border-green-200 rounded-lg p-6">
                     <h4 className="text-lg font-semibold text-green-800 mb-4">✅ Package Created Successfully!</h4>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-4">
                       <div>
-                        <h5 className="font-semibold text-gray-800 mb-2">Package Details</h5>
-                        <div className="space-y-1 text-sm">
-                          <p><strong>Package ID:</strong> {createdPackage.id}</p>
-                          <p><strong>Order ID:</strong> {createdPackage.orderId}</p>
-                          <p><strong>Device:</strong> {createdPackage.deviceId}</p>
-                          <p><strong>PIN:</strong> {createdPackage.pin}</p>
+                        <h5 className="font-semibold text-gray-800 mb-3">Package Details</h5>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div className="bg-white p-3 rounded">
+                            <p className="text-gray-600">Package ID</p>
+                            <p className="font-semibold text-lg">{createdPackage.package_id}</p>
+                          </div>
+                          <div className="bg-white p-3 rounded">
+                            <p className="text-gray-600">Order ID</p>
+                            <p className="font-semibold text-lg">{createdPackage.order_id}</p>
+                          </div>
+                          <div className="bg-white p-3 rounded">
+                            <p className="text-gray-600">Device ID</p>
+                            <p className="font-semibold text-lg">{createdPackage.device_id}</p>
+                          </div>
+                          <div className="bg-white p-3 rounded">
+                            <p className="text-gray-600">Receiver PIN</p>
+                            <p className="font-semibold text-lg">{createdPackage.pin}</p>
+                          </div>
                         </div>
                       </div>
 
-                      <div className="text-center">
-                        <h5 className="font-semibold text-gray-800 mb-2">QR Code</h5>
-                        <img 
-                          src={generateQRCodeURL(createdPackage.qrUrl)} 
-                          alt="Package QR Code"
-                          className="mx-auto border border-gray-300 rounded"
-                        />
-                        <p className="text-xs text-gray-500 mt-2">Attach to hardware device</p>
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <div className="flex items-start gap-3">
+                          <span className="text-2xl">📱</span>
+                          <div className="w-full">
+                            <h5 className="font-semibold text-blue-800 mb-2">ESP32 QR Code Format</h5>
+                            <p className="text-sm text-blue-700 mb-3">
+                              The ESP32 device's QR code contains <strong>package_token + 4 sensor parameters</strong>
+                            </p>
+                            <div className="bg-white rounded p-3 text-xs font-mono">
+                              <p className="text-gray-600 mb-2">QR Code Data:</p>
+                              {createdPackage.esp32_qr_data && (
+                                <div className="space-y-1">
+                                  <p>📦 <strong>package_token:</strong> {createdPackage.package_token}</p>
+                                  <p>🔒 <strong>tamper_status:</strong> {createdPackage.esp32_qr_data.tamper_status}</p>
+                                  <p>🔗 <strong>loop_connected:</strong> {createdPackage.esp32_qr_data.loop_connected ? 'true' : 'false'}</p>
+                                  <p>⚡ <strong>acceleration:</strong> {createdPackage.esp32_qr_data.acceleration} m/s²</p>
+                                  <p>🌡️ <strong>temperature:</strong> {createdPackage.esp32_qr_data.temperature}°C</p>
+                                </div>
+                              )}
+                            </div>
+                            <p className="text-xs text-blue-600 mt-2">
+                              ℹ️ Sensor values update in real-time on ESP32 device
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                        <div className="flex items-start gap-3">
+                          <span className="text-2xl">💡</span>
+                          <div>
+                            <h5 className="font-semibold text-yellow-800 mb-1">Next Steps</h5>
+                            <ul className="text-sm text-yellow-700 space-y-1">
+                              <li>• Attach ESP32 device to the package</li>
+                              <li>• Share PIN <strong>{createdPackage.pin}</strong> with receiver</li>
+                              <li>• Device QR code: <strong>{createdPackage.device_id}</strong></li>
+                            </ul>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="flex gap-3 mt-6">
-                      <button 
-                        onClick={() => window.print()}
-                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
-                      >
-                        🖨️ Print QR Code
-                      </button>
-                      <button 
-                        onClick={() => setCreatedPackage(null)}
-                        className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
-                      >
-                        Create Another
-                      </button>
-                    </div>
+                    <button 
+                      onClick={() => setCreatedPackage(null)}
+                      className="w-full mt-6 px-4 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                    >
+                      Create Another Package
+                    </button>
                   </div>
                 )}
               </div>
@@ -551,6 +853,341 @@ function SenderDashboard() {
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Transit Reports Tab */}
+            {activeTab === 'reports' && (
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-6">Transit Reports with Blockchain Verification</h3>
+                
+                {!selectedPackageId ? (
+                  <div>
+                    <p className="text-gray-600 mb-4">Select a package to view its complete transit report including blockchain hashes for tampering events:</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {livePackages.map((pkg) => (
+                        <div 
+                          key={pkg.id} 
+                          onClick={() => loadTransitReport(pkg.id)}
+                          className="bg-white border border-gray-200 rounded-lg p-4 hover:border-blue-500 hover:shadow-md transition-all cursor-pointer"
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="font-semibold text-gray-800">{pkg.id}</h4>
+                            {pkg.isTampered && (
+                              <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium">
+                                🚨 Tampered
+                              </span>
+                            )}
+                          </div>
+                          <div className="space-y-1 text-sm text-gray-600">
+                            <p><strong>Order:</strong> {pkg.orderId}</p>
+                            <p><strong>Type:</strong> {pkg.type}</p>
+                            <p><strong>Status:</strong> {pkg.status}</p>
+                            <p><strong>Location:</strong> {pkg.location}</p>
+                          </div>
+                          <button className="mt-3 w-full py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors">
+                            View Report →
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    {livePackages.length === 0 && (
+                      <div className="text-center py-8 text-gray-500">
+                        No packages found. Create packages to view transit reports.
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <button
+                      onClick={() => {
+                        setSelectedPackageId(null);
+                        setTransitReport(null);
+                      }}
+                      className="mb-4 px-4 py-2 text-blue-600 hover:text-blue-800 font-medium"
+                    >
+                      ← Back to Package List
+                    </button>
+
+                    {isLoadingReport ? (
+                      <div className="text-center py-8">
+                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                        <p className="mt-2 text-gray-600">Loading transit report...</p>
+                      </div>
+                    ) : transitReport ? (
+                      <div className="space-y-6">
+                        {/* Package Info */}
+                        <div className="bg-white border border-gray-200 rounded-lg p-6">
+                          <h4 className="text-lg font-semibold text-gray-800 mb-4">📦 Package Information</h4>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                            <div>
+                              <p className="text-gray-600">Package ID</p>
+                              <p className="font-semibold">{transitReport.package_info.package_id}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-600">Order ID</p>
+                              <p className="font-semibold">{transitReport.package_info.order_id}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-600">Type</p>
+                              <p className="font-semibold">{transitReport.package_info.package_type}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-600">Device ID</p>
+                              <p className="font-semibold">{transitReport.package_info.device_id}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-600">Status</p>
+                              <p className="font-semibold">{transitReport.current_status.status}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-600">Location</p>
+                              <p className="font-semibold">{transitReport.current_status.location}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Security Status with Blockchain Hashes */}
+                        {transitReport.security.is_tampered && transitReport.security.blockchain_hashes.length > 0 && (
+                          <div className="bg-red-50 border-2 border-red-300 rounded-lg p-6">
+                            <h4 className="text-lg font-semibold text-red-800 mb-4">🚨 Security Alerts - Blockchain Verified</h4>
+                            <p className="text-red-700 mb-4">
+                              <strong>{transitReport.security.tamper_count}</strong> tampering event(s) detected and logged to blockchain
+                            </p>
+                            
+                            <div className="space-y-4">
+                              {transitReport.security.blockchain_hashes.map((hash, index) => (
+                                <div key={index} className="bg-white border border-red-200 rounded-lg p-4">
+                                  <div className="flex items-start justify-between mb-3">
+                                    <div>
+                                      <h5 className="font-semibold text-red-800">Tampering Event #{index + 1}</h5>
+                                      <p className="text-sm text-gray-600">{hash.event_type}</p>
+                                    </div>
+                                    <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium">
+                                      ⛓️ Blockchain Verified
+                                    </span>
+                                  </div>
+                                  
+                                  <div className="space-y-2 text-sm">
+                                    <div className="bg-gray-50 p-3 rounded">
+                                      <p className="text-gray-600 mb-1">Blockchain Hash:</p>
+                                      <p className="font-mono text-xs break-all text-blue-600">{hash.blockchain_hash}</p>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                      <div>
+                                        <p className="text-gray-600">Block Number:</p>
+                                        <p className="font-semibold">{hash.blockchain_block}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-gray-600">Timestamp:</p>
+                                        <p className="font-semibold">{new Date(hash.timestamp).toLocaleString()}</p>
+                                      </div>
+                                    </div>
+                                    {hash.location && (
+                                      <div>
+                                        <p className="text-gray-600">Location:</p>
+                                        <p className="font-semibold">{hash.location}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* All Tamper Events */}
+                        {transitReport.security.tamper_events.length > 0 && (
+                          <div className="bg-white border border-gray-200 rounded-lg p-6">
+                            <h4 className="text-lg font-semibold text-gray-800 mb-4">🔍 All Tamper Events</h4>
+                            <div className="space-y-3">
+                              {transitReport.security.tamper_events.map((event, index) => (
+                                <div key={index} className="bg-red-50 border border-red-200 rounded-lg p-4">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <h5 className="font-semibold text-red-800">{event.tamper_type}</h5>
+                                    <span className="text-xs text-gray-600">{new Date(event.detected_at).toLocaleString()}</span>
+                                  </div>
+                                  {event.blockchain_hash && (
+                                    <div className="mt-2 p-2 bg-white rounded text-xs">
+                                      <p className="text-gray-600">Blockchain Hash:</p>
+                                      <p className="font-mono text-blue-600 break-all">{event.blockchain_hash}</p>
+                                    </div>
+                                  )}
+                                  {event.sensor_data && (
+                                    <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                                      {event.sensor_data.temperature && (
+                                        <div className="bg-white p-2 rounded">
+                                          <p className="text-gray-600">Temp:</p>
+                                          <p className="font-semibold">{event.sensor_data.temperature}°C</p>
+                                        </div>
+                                      )}
+                                      {event.sensor_data.acceleration !== undefined && (
+                                        <div className="bg-white p-2 rounded">
+                                          <p className="text-gray-600">Acceleration:</p>
+                                          <p className={`font-semibold ${event.sensor_data.acceleration > 20 ? 'text-red-600' : ''}`}>
+                                            {event.sensor_data.acceleration} m/s²
+                                          </p>
+                                        </div>
+                                      )}
+                                      {event.sensor_data.loop_connected !== undefined && (
+                                        <div className="bg-white p-2 rounded">
+                                          <p className="text-gray-600">Wire Loop:</p>
+                                          <p className={`font-semibold ${event.sensor_data.loop_connected ? 'text-green-600' : 'text-red-600'}`}>
+                                            {event.sensor_data.loop_connected ? '✅ OK' : '❌ Broken'}
+                                          </p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Transit Logs from ESP32 Scans */}
+                        {transitReport.transit_data && transitReport.transit_data.transit_logs.length > 0 && (
+                          <div className="bg-white border border-gray-200 rounded-lg p-6">
+                            <h4 className="text-lg font-semibold text-gray-800 mb-4">📡 ESP32 Transit Scans</h4>
+                            <p className="text-sm text-gray-600 mb-4">Total scans: {transitReport.transit_data.total_scans}</p>
+                            <div className="space-y-3">
+                              {transitReport.transit_data.transit_logs.map((log, index) => (
+                                <div key={index} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className="text-sm font-semibold text-gray-800">Scan #{index + 1}</span>
+                                    <span className="text-xs text-gray-600">{new Date(log.logged_at).toLocaleString()}</span>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+                                    <div>
+                                      <p className="text-gray-600">Device:</p>
+                                      <p className="font-semibold">{log.device_id}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-gray-600">Location:</p>
+                                      <p className="font-semibold">{log.location}</p>
+                                    </div>
+                                  </div>
+                                  {log.sensor_data && (
+                                    <div className="p-2 bg-white rounded text-xs">
+                                      <p className="text-gray-600 mb-1">Sensor Data:</p>
+                                      <div className="grid grid-cols-3 gap-2">
+                                        {log.sensor_data.temperature && (
+                                          <div>
+                                            <p className="text-gray-500">Temp:</p>
+                                            <p className="font-semibold">{log.sensor_data.temperature}°C</p>
+                                          </div>
+                                        )}
+                                        {log.sensor_data.battery_level && (
+                                          <div>
+                                            <p className="text-gray-500">Battery:</p>
+                                            <p className="font-semibold">{log.sensor_data.battery_level}%</p>
+                                          </div>
+                                        )}
+                                        {log.sensor_data.tamper_status && (
+                                          <div>
+                                            <p className="text-gray-500">Status:</p>
+                                            <p className={`font-semibold ${
+                                              log.sensor_data.tamper_status === 'secure' ? 'text-green-600' : 'text-red-600'
+                                            }`}>
+                                              {log.sensor_data.tamper_status}
+                                            </p>
+                                          </div>
+                                        )}
+                                        {log.sensor_data.acceleration !== undefined && (
+                                          <div>
+                                            <p className="text-gray-500">Accel:</p>
+                                            <p className={`font-semibold ${
+                                              log.sensor_data.acceleration > 20 ? 'text-red-600' : 'text-gray-800'
+                                            }`}>
+                                              {log.sensor_data.acceleration} m/s²
+                                            </p>
+                                          </div>
+                                        )}
+                                        {log.sensor_data.loop_connected !== undefined && (
+                                          <div>
+                                            <p className="text-gray-500">Loop:</p>
+                                            <p className={`font-semibold ${
+                                              log.sensor_data.loop_connected ? 'text-green-600' : 'text-red-600'
+                                            }`}>
+                                              {log.sensor_data.loop_connected ? '✅' : '❌'}
+                                            </p>
+                                          </div>
+                                        )}
+                                        {log.sensor_data.humidity !== undefined && (
+                                          <div>
+                                            <p className="text-gray-500">Humidity:</p>
+                                            <p className="font-semibold">{log.sensor_data.humidity}%</p>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Journey/Checkpoint Logs */}
+                        {transitReport.journey.scan_logs.length > 0 && (
+                          <div className="bg-white border border-gray-200 rounded-lg p-6">
+                            <h4 className="text-lg font-semibold text-gray-800 mb-4">🗺️ Checkpoint Journey</h4>
+                            <div className="space-y-3">
+                              {transitReport.journey.scan_logs.map((log, index) => (
+                                <div key={index} className="border-l-4 border-blue-500 pl-4 py-2">
+                                  <div className="flex items-center justify-between">
+                                    <h5 className="font-semibold text-gray-800">{log.name}</h5>
+                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                      log.status === 'passed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                    }`}>
+                                      {log.status}
+                                    </span>
+                                  </div>
+                                  <p className="text-sm text-gray-600">{log.location}</p>
+                                  <p className="text-xs text-gray-500 mt-1">{new Date(log.scanned_at).toLocaleString()}</p>
+                                  {log.notes && <p className="text-sm text-gray-700 mt-1">{log.notes}</p>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        Failed to load transit report. Please try again.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* QR Scanner Modal */}
+            {showQRScanner && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-800">Scan ESP32 QR Code</h3>
+                    <button
+                      onClick={stopQRScanner}
+                      className="text-gray-500 hover:text-gray-700 text-2xl"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  
+                  {scannerError ? (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                      <p className="text-red-700 text-sm">{scannerError}</p>
+                    </div>
+                  ) : null}
+                  
+                  <div id="qr-reader-create" className="w-full"></div>
+                  
+                  <p className="text-sm text-gray-600 mt-4 text-center">
+                    Position the ESP32's QR code within the frame
+                  </p>
                 </div>
               </div>
             )}

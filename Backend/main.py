@@ -43,6 +43,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- Checkpoint Mapping ---
+# Map checkpoint IDs to new warehouse names
+CHECKPOINT_MAPPING = {
+    "CP001": {"name": "Warehouse 1", "location": "Warehouse 1"},
+    "CP002": {"name": "Warehouse 2", "location": "Warehouse 2"},
+    "CP003": {"name": "Warehouse 3", "location": "Warehouse 3"},
+    "CP004": {"name": "Warehouse 4", "location": "Warehouse 4"},
+    "CP005": {"name": "Warehouse 5", "location": "Warehouse 5"},
+    "CP006": {"name": "Delivered", "location": "Customer Location"}
+}
+
+def get_checkpoint_name(checkpoint_id: str) -> str:
+    """Get checkpoint name from ID"""
+    return CHECKPOINT_MAPPING.get(checkpoint_id, {}).get("name", checkpoint_id)
+
+def get_checkpoint_location(checkpoint_id: str) -> str:
+    """Get checkpoint location from ID"""
+    return CHECKPOINT_MAPPING.get(checkpoint_id, {}).get("location", "Unknown")
+
 # --- Blockchain Configuration ---
 # Get blockchain secrets from .env file
 BLOCKCHAIN_PRIVATE_KEY = os.getenv("SERVER_PRIVATE_KEY")
@@ -156,6 +175,8 @@ class ESP32Data(BaseModel):
     battery_level: int
     shock_detected: bool = False
     gps_location: Optional[str] = None
+    loop_connected: bool = True  # Wire loop connection status
+    acceleration: Optional[float] = None  # Acceleration in m/s²
 
 class CheckpointData(BaseModel):
     checkpoint_id: str
@@ -486,61 +507,96 @@ async def get_dashboard_data():
 # --- Package Management Endpoints ---
 
 @app.post("/packages/create")
-async def create_package(package_data: PackageCreation, token_data: dict = Depends(verify_token)):
+async def create_package(package_data: PackageCreation, token_data: dict = Depends(require_role("sender"))):
     """
-    Create a new package with tracking capabilities
+    Create a new package and link it to ESP32 device
+    Package token is linked to sender's username for automatic data updates
     """
     try:
-        # Generate unique package token
-        package_token = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))
-        package_id = f"PKG{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        # Get sender info
+        sender = await app.mongodb.users.find_one({"_id": token_data["sub"]})
+        sender_username = sender["username"]
+        
+        # Use device_id as package_id since each ESP32 has a fixed QR code
+        package_id = package_data.device_id
+        
+        # Create package_token linked to sender's username
+        # Format: SENDER_USERNAME_DEVICEID_TIMESTAMP
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        package_token = f"{sender_username}_{package_data.device_id}_{timestamp}"
         
         # Generate PIN for customer
-        pin = ''.join(secrets.choice(string.digits) for _ in range(6))
+        pin = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+        
+        # Check if this device already has an active package
+        existing_package = await app.mongodb.packages.find_one({
+            "device_id": package_data.device_id,
+            "current_status": {"$nin": ["delivered", "cancelled"]}
+        })
+        
+        if existing_package:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Device {package_data.device_id} is already assigned to an active package"
+            )
         
         # Create package document
-        package_doc = {
+        package = {
             "package_id": package_id,
             "package_token": package_token,
             "order_id": package_data.order_id,
             "package_type": package_data.package_type,
             "device_id": package_data.device_id,
-            "sender_id": package_data.sender_id,
+            "sender_id": token_data["sub"],
+            "sender_username": sender_username,
             "receiver_phone": package_data.receiver_phone,
             "pin": pin,
-            "authenticated": False,
-            
-            # Current status
             "current_status": "created",
+            "current_location": "Warehouse 1",
             "current_checkpoint": None,
-            "current_location": "Warehouse",
-            
-            # Checkpoint journey
+            "is_tampered": False,
             "checkpoints": [],
-            
-            # Timestamps
+            "scan_logs": [],
+            "tamper_events": [],
+            "transit_logs": [],
             "created_at": datetime.now(),
             "updated_at": datetime.now(),
-            
-            # Additional info
             "notes": package_data.notes
         }
         
-        # Insert package
-        result = await app.mongodb.packages.insert_one(package_doc)
+        # Insert into database
+        result = await app.mongodb.packages.insert_one(package)
         
-        # Mock SMS sending
-        print(f"📱 SMS to {package_data.receiver_phone}: Your VeriSeal PIN is {pin}")
+        print(f"📦 Package created: {package_id} with token {package_token}")
+        print(f"🔗 Linked to sender: {sender_username}")
+        
+        # ESP32 QR Code Format: package_token + 4 sensor parameters
+        esp32_qr_format = {
+            "package_token": package_token,
+            "tamper_status": "secure",  # Will be updated by ESP32 in real-time
+            "loop_connected": True,      # Wire loop status
+            "acceleration": 0.0,         # m/s² - will be updated by ESP32
+            "temperature": 25.0          # °C - will be updated by ESP32
+        }
         
         return {
             "package_id": package_id,
             "package_token": package_token,
-            "pin": pin,  # For demo purposes
-            "qr_url": f"https://veriseal.app/scan?token={package_token}",
-            "message": "Package created successfully"
+            "order_id": package_data.order_id,
+            "device_id": package_data.device_id,
+            "pin": pin,
+            "status": "created",
+            "sender_username": sender_username,
+            "message": "Package created! ESP32 QR contains: package_token + 4 sensor parameters",
+            "esp32_qr_data": esp32_qr_format,
+            "qr_instructions": "ESP32 QR code should contain: package_token, tamper_status, loop_connected, acceleration, temperature",
+            "created_at": package["created_at"].isoformat()
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Error creating package: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/delivery/scan-checkpoint")
@@ -718,13 +774,41 @@ async def report_tamper(tamper_data: ESP32TamperReport):
         if package["device_id"] != tamper_data.device_id:
             raise HTTPException(status_code=403, detail="Device ID mismatch")
         
-        # Create tamper event with timestamp
+        # Generate blockchain hash for tampering event
+        blockchain_hash = None
+        blockchain_tx = None
+        if web3 and contract:
+            try:
+                # Log tampering event to blockchain
+                tx = contract.functions.addLog(
+                    tamper_data.device_id,
+                    f"TAMPER_{tamper_data.tamper_type}_{package['package_id']}"
+                ).build_transaction({
+                    'from': server_account.address,
+                    'nonce': web3.eth.get_transaction_count(server_account.address),
+                    'gas': 200000,
+                    'gasPrice': web3.eth.gas_price
+                })
+                
+                signed_tx = web3.eth.account.sign_transaction(tx, private_key=BLOCKCHAIN_PRIVATE_KEY)
+                tx_hash = web3.eth.send_raw_transaction(signed_tx.raw_transaction)
+                tx_receipt = web3.eth.wait_for_transaction_receipt(tx_hash)
+                
+                blockchain_hash = tx_hash.hex()
+                blockchain_tx = tx_receipt.blockNumber
+                print(f"✅ Blockchain hash generated: {blockchain_hash}")
+            except Exception as e:
+                print(f"⚠️ Blockchain logging failed: {e}")
+        
+        # Create tamper event with timestamp and blockchain hash
         tamper_event = {
             "timestamp": datetime.now(),
             "tamper_type": tamper_data.tamper_type,
             "sensor_data": tamper_data.sensor_data,
             "gps_location": tamper_data.gps_location,
-            "detected_at": datetime.now().isoformat()
+            "detected_at": datetime.now().isoformat(),
+            "blockchain_hash": blockchain_hash,
+            "blockchain_block": blockchain_tx
         }
         
         # Add to database
@@ -745,13 +829,146 @@ async def report_tamper(tamper_data: ESP32TamperReport):
             "status": "success",
             "message": "Tamper event recorded",
             "package_id": package["package_id"],
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "blockchain_hash": blockchain_hash,
+            "blockchain_block": blockchain_tx
         }
         
     except HTTPException:
         raise
     except Exception as e:
         print(f"Error in report_tamper: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/esp32/scan-package")
+async def esp32_scan_package(scan_data: dict):
+    """
+    ESP32 scanner endpoint - accepts package_id and stores sensor data
+    This endpoint is called when ESP32 scans a package during transit
+    """
+    try:
+        package_id = scan_data.get("package_id")
+        device_id = scan_data.get("device_id")
+        sensor_data = scan_data.get("sensor_data", {})
+        location = scan_data.get("location", "Unknown")
+        
+        if not package_id or not device_id:
+            raise HTTPException(status_code=400, detail="Missing package_id or device_id")
+        
+        # Find package by package_id
+        package = await app.mongodb.packages.find_one({"package_id": package_id})
+        
+        if not package:
+            raise HTTPException(status_code=404, detail="Package not found")
+        
+        # Verify device ID matches
+        if package["device_id"] != device_id:
+            raise HTTPException(status_code=403, detail="Device ID mismatch")
+        
+        # Create transit log entry
+        transit_log = {
+            "timestamp": datetime.now(),
+            "device_id": device_id,
+            "sensor_data": sensor_data,
+            "location": location,
+            "logged_at": datetime.now().isoformat()
+        }
+        
+        # Check for tampering in sensor data
+        # Tampering detected if:
+        # 1. tamper_status is "tampered"
+        # 2. shock_detected is True
+        # 3. loop_connected is False (wire loop broken)
+        # 4. acceleration is abnormally high (> 20 m/s²)
+        is_tampered = (
+            sensor_data.get("tamper_status") == "tampered" or 
+            sensor_data.get("shock_detected", False) or
+            not sensor_data.get("loop_connected", True) or
+            (sensor_data.get("acceleration") and sensor_data.get("acceleration") > 20)
+        )
+        
+        # If tampering detected, generate blockchain hash
+        if is_tampered:
+            blockchain_hash = None
+            blockchain_tx = None
+            if web3 and contract:
+                try:
+                    tx = contract.functions.addLog(
+                        device_id,
+                        f"TAMPER_SCAN_{package_id}"
+                    ).build_transaction({
+                        'from': server_account.address,
+                        'nonce': web3.eth.get_transaction_count(server_account.address),
+                        'gas': 200000,
+                        'gasPrice': web3.eth.gas_price
+                    })
+                    
+                    signed_tx = web3.eth.account.sign_transaction(tx, private_key=BLOCKCHAIN_PRIVATE_KEY)
+                    tx_hash = web3.eth.send_raw_transaction(signed_tx.raw_transaction)
+                    tx_receipt = web3.eth.wait_for_transaction_receipt(tx_hash)
+                    
+                    blockchain_hash = tx_hash.hex()
+                    blockchain_tx = tx_receipt.blockNumber
+                    print(f"✅ Blockchain hash for tampering: {blockchain_hash}")
+                except Exception as e:
+                    print(f"⚠️ Blockchain logging failed: {e}")
+            
+            # Add tampering event
+            tamper_event = {
+                "timestamp": datetime.now(),
+                "tamper_type": "sensor_detected",
+                "sensor_data": sensor_data,
+                "gps_location": location,
+                "detected_at": datetime.now().isoformat(),
+                "blockchain_hash": blockchain_hash,
+                "blockchain_block": blockchain_tx
+            }
+            
+            await app.mongodb.packages.update_one(
+                {"package_id": package_id},
+                {
+                    "$push": {
+                        "transit_logs": transit_log,
+                        "tamper_events": tamper_event
+                    },
+                    "$set": {
+                        "is_tampered": True,
+                        "updated_at": datetime.now()
+                    }
+                }
+            )
+            
+            return {
+                "status": "success",
+                "message": "⚠️ Tampering detected and logged",
+                "package_id": package_id,
+                "is_tampered": True,
+                "blockchain_hash": blockchain_hash,
+                "blockchain_block": blockchain_tx,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            # Normal scan - no tampering
+            await app.mongodb.packages.update_one(
+                {"package_id": package_id},
+                {
+                    "$push": {"transit_logs": transit_log},
+                    "$set": {"updated_at": datetime.now()}
+                }
+            )
+            
+            return {
+                "status": "success",
+                "message": "✅ Transit data logged successfully",
+                "package_id": package_id,
+                "is_tampered": False,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in esp32_scan_package: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/receiver/verify-package")
@@ -1360,11 +1577,40 @@ async def get_sender_packages(token_data: dict = Depends(require_role("sender"))
         async for package in cursor:
             package["_id"] = str(package["_id"])
             
-            # Get latest ESP32 data
+            # Get latest ESP32 data from scan_logs
             latest_esp32_data = None
-            if package.get("checkpoints"):
-                latest_checkpoint = package["checkpoints"][-1]
-                latest_esp32_data = latest_checkpoint.get("esp32_data")
+            scan_logs = package.get("scan_logs", [])
+            if scan_logs:
+                latest_scan = scan_logs[-1]
+                latest_esp32_data = latest_scan.get("esp32_data")
+            
+            # Convert old checkpoint names to new warehouse format
+            current_checkpoint = package.get("current_checkpoint")
+            current_location = package["current_location"]
+            
+            # If there's a checkpoint ID, use the mapping
+            if current_checkpoint and current_checkpoint in CHECKPOINT_MAPPING:
+                current_location = get_checkpoint_location(current_checkpoint)
+            # Otherwise, map old location names to new format
+            elif "Mumbai" in current_location or "Warehouse Dispatch" in current_location:
+                current_location = "Warehouse 1"
+            elif "Central Hub" in current_location or "Local Hub" in current_location:
+                current_location = "Warehouse 2"
+            elif "Delhi" in current_location or "Transit Hub" in current_location:
+                current_location = "Warehouse 3"
+            elif "Bangalore" in current_location or "Destination Hub" in current_location:
+                current_location = "Warehouse 4"
+            elif "Delivery Center" in current_location or "Out for Delivery" in current_location:
+                current_location = "Warehouse 5"
+            
+            # Update scan logs with new checkpoint names
+            updated_scan_logs = []
+            for log in scan_logs:
+                log_copy = log.copy()
+                if "checkpoint_id" in log_copy and log_copy["checkpoint_id"] in CHECKPOINT_MAPPING:
+                    log_copy["name"] = get_checkpoint_name(log_copy["checkpoint_id"])
+                    log_copy["location"] = get_checkpoint_location(log_copy["checkpoint_id"])
+                updated_scan_logs.append(log_copy)
             
             packages.append({
                 "package_id": package["package_id"],
@@ -1372,10 +1618,12 @@ async def get_sender_packages(token_data: dict = Depends(require_role("sender"))
                 "package_type": package["package_type"],
                 "device_id": package["device_id"],
                 "current_status": package["current_status"],
-                "current_location": package["current_location"],
-                "current_checkpoint": package.get("current_checkpoint"),
-                "checkpoints_count": len(package.get("checkpoints", [])),
+                "current_location": current_location,
+                "current_checkpoint": current_checkpoint,
+                "checkpoints_count": len(scan_logs),
                 "latest_esp32_data": latest_esp32_data,
+                "is_tampered": package.get("is_tampered", False),
+                "scan_logs": updated_scan_logs,
                 "created_at": package["created_at"].isoformat(),
                 "updated_at": package["updated_at"].isoformat()
             })
@@ -1401,10 +1649,117 @@ async def get_package_journey(package_id: str, token_data: dict = Depends(requir
             "order_id": package["order_id"],
             "current_status": package["current_status"],
             "current_location": package["current_location"],
-            "checkpoints": package.get("checkpoints", []),
+            "is_tampered": package.get("is_tampered", False),
+            "scan_logs": package.get("scan_logs", []),
+            "tamper_events": package.get("tamper_events", []),
+            "transit_logs": package.get("transit_logs", []),
             "created_at": package["created_at"].isoformat(),
             "updated_at": package["updated_at"].isoformat()
         }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/sender/package/{package_id}/transit-report")
+async def get_transit_report(package_id: str, token_data: dict = Depends(require_role("sender"))):
+    """
+    Get complete transit report for a package including all scans, tampering events, and blockchain hashes
+    """
+    try:
+        package = await app.mongodb.packages.find_one({"package_id": package_id, "sender_id": token_data["sub"]})
+        
+        if not package:
+            raise HTTPException(status_code=404, detail="Package not found")
+        
+        # Convert old checkpoint names to new warehouse format
+        current_checkpoint = package.get("current_checkpoint")
+        current_location = package["current_location"]
+        
+        # If there's a checkpoint ID, use the mapping
+        if current_checkpoint and current_checkpoint in CHECKPOINT_MAPPING:
+            current_location = get_checkpoint_location(current_checkpoint)
+        # Otherwise, map old location names to new format
+        elif "Mumbai" in current_location or "Warehouse Dispatch" in current_location:
+            current_location = "Warehouse 1"
+        elif "Central Hub" in current_location or "Local Hub" in current_location:
+            current_location = "Warehouse 2"
+        elif "Delhi" in current_location or "Transit Hub" in current_location:
+            current_location = "Warehouse 3"
+        elif "Bangalore" in current_location or "Destination Hub" in current_location:
+            current_location = "Warehouse 4"
+        elif "Delivery Center" in current_location or "Out for Delivery" in current_location:
+            current_location = "Warehouse 5"
+        
+        # Update scan logs with new checkpoint names
+        scan_logs = package.get("scan_logs", [])
+        updated_scan_logs = []
+        for log in scan_logs:
+            log_copy = log.copy()
+            if "checkpoint_id" in log_copy and log_copy["checkpoint_id"] in CHECKPOINT_MAPPING:
+                log_copy["name"] = get_checkpoint_name(log_copy["checkpoint_id"])
+                log_copy["location"] = get_checkpoint_location(log_copy["checkpoint_id"])
+            # Also update old location names in logs
+            elif "location" in log_copy:
+                old_location = log_copy["location"]
+                if "Mumbai" in old_location or "Warehouse Dispatch" in old_location:
+                    log_copy["location"] = "Warehouse 1"
+                elif "Central Hub" in old_location or "Local Hub" in old_location:
+                    log_copy["location"] = "Warehouse 2"
+                elif "Delhi" in old_location or "Transit Hub" in old_location:
+                    log_copy["location"] = "Warehouse 3"
+                elif "Bangalore" in old_location or "Destination Hub" in old_location:
+                    log_copy["location"] = "Warehouse 4"
+                elif "Delivery Center" in old_location or "Out for Delivery" in old_location:
+                    log_copy["location"] = "Warehouse 5"
+            updated_scan_logs.append(log_copy)
+        
+        # Compile complete transit report
+        transit_report = {
+            "package_info": {
+                "package_id": package["package_id"],
+                "order_id": package["order_id"],
+                "package_type": package["package_type"],
+                "device_id": package["device_id"],
+                "receiver_phone": package["receiver_phone"],
+                "created_at": package["created_at"].isoformat(),
+                "updated_at": package["updated_at"].isoformat()
+            },
+            "current_status": {
+                "status": package["current_status"],
+                "location": current_location,
+                "checkpoint": current_checkpoint,
+                "is_tampered": package.get("is_tampered", False)
+            },
+            "journey": {
+                "total_checkpoints": len(updated_scan_logs),
+                "scan_logs": updated_scan_logs,
+                "checkpoints": package.get("checkpoints", [])
+            },
+            "transit_data": {
+                "total_scans": len(package.get("transit_logs", [])),
+                "transit_logs": package.get("transit_logs", [])
+            },
+            "security": {
+                "is_tampered": package.get("is_tampered", False),
+                "tamper_count": len(package.get("tamper_events", [])),
+                "tamper_events": package.get("tamper_events", []),
+                "blockchain_hashes": [
+                    {
+                        "event_type": event.get("tamper_type"),
+                        "timestamp": event.get("detected_at"),
+                        "blockchain_hash": event.get("blockchain_hash"),
+                        "blockchain_block": event.get("blockchain_block"),
+                        "location": event.get("gps_location")
+                    }
+                    for event in package.get("tamper_events", [])
+                    if event.get("blockchain_hash")
+                ]
+            }
+        }
+        
+        return transit_report
         
     except HTTPException:
         raise

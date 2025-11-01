@@ -20,14 +20,7 @@ function DeliveryDashboard() {
   
   // Checkpoint state
   const [selectedCheckpoint, setSelectedCheckpoint] = useState('CP001');
-  const [esp32Data, setEsp32Data] = useState({
-    temperature: 22.5,
-    humidity: 45,
-    tamper_status: 'secure',
-    battery_level: 85,
-    shock_detected: false,
-    gps_location: '19.0760,72.8777'
-  });
+  const [esp32Data, setEsp32Data] = useState(null); // Start with null - only show after QR scan
   const [checkpointStatus, setCheckpointStatus] = useState('passed');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -38,11 +31,11 @@ function DeliveryDashboard() {
 
   // Checkpoints configuration
   const checkpoints = [
-    { id: 'CP001', name: 'Warehouse Dispatch', location: 'Mumbai Warehouse', icon: '🏭' },
-    { id: 'CP002', name: 'Local Hub', location: 'Mumbai Central Hub', icon: '🏢' },
-    { id: 'CP003', name: 'Transit Hub', location: 'Delhi Transit Hub', icon: '🚛' },
-    { id: 'CP004', name: 'Destination Hub', location: 'Bangalore Hub', icon: '🏪' },
-    { id: 'CP005', name: 'Out for Delivery', location: 'Local Delivery Center', icon: '🚚' },
+    { id: 'CP001', name: 'Warehouse 1', location: 'Warehouse 1', icon: '🏭' },
+    { id: 'CP002', name: 'Warehouse 2', location: 'Warehouse 2', icon: '🏢' },
+    { id: 'CP003', name: 'Warehouse 3', location: 'Warehouse 3', icon: '🚛' },
+    { id: 'CP004', name: 'Warehouse 4', location: 'Warehouse 4', icon: '🏪' },
+    { id: 'CP005', name: 'Warehouse 5', location: 'Warehouse 5', icon: '🚚' },
     { id: 'CP006', name: 'Delivered', location: 'Customer Location', icon: '🏠' }
   ];
 
@@ -82,12 +75,12 @@ function DeliveryDashboard() {
 
   const handleScanPackage = async () => {
     if (!packageToken.trim()) {
-      setScanResult('❌ Please enter a package token or QR data');
+      setScanResult('❌ Please scan a QR code or enter a package token');
       return;
     }
 
     setIsScanning(true);
-    setScanResult('');
+    setScanResult('🔍 Validating package...');
     setShowUploadButton(false);
 
     try {
@@ -100,8 +93,32 @@ function DeliveryDashboard() {
         parsedQR = { package_token: packageToken };
       }
 
-      // Extract package token
-      const token = parsedQR.package_token || packageToken;
+      // Extract package token and sensor data from QR
+      let token = parsedQR.package_token || packageToken;
+      
+      // If QR contains sensor data, set it
+      if (parsedQR.tamper_status || parsedQR.temperature || parsedQR.acceleration) {
+        console.log('📊 ESP32 sensor data found in QR:', parsedQR);
+        setEsp32Data({
+          temperature: parsedQR.temperature || 25.0,
+          humidity: parsedQR.humidity || 45,
+          tamper_status: parsedQR.tamper_status || 'secure',
+          battery_level: parsedQR.battery_level || 85,
+          shock_detected: parsedQR.shock_detected || false,
+          gps_location: parsedQR.gps_location || '',
+          loop_connected: parsedQR.loop_connected !== undefined ? parsedQR.loop_connected : true,
+          acceleration: parsedQR.acceleration || 0.0
+        });
+        setQrData(parsedQR);
+      }
+      
+      // FOR DEMO: If scanned data doesn't look like a package token, use demo token
+      if (!token.includes('demo_token') && !token.includes('PKG') && !token.includes('_')) {
+        console.log('Using demo token for:', token);
+        token = 'demo_token_electronics_001';  // Default demo package
+        setPackageToken(token);  // Save the demo token
+        setScanResult('🔍 Using demo package for validation...');
+      }
 
       // Call backend to validate package
       const response = await fetch('http://127.0.0.1:8000/delivery/scan-qr', {
@@ -117,16 +134,9 @@ function DeliveryDashboard() {
         const data = await response.json();
         setPackageData(data);
         
-        // If QR contains ESP32 data, use it
-        if (parsedQR.esp32_data) {
-          setQrData(parsedQR);
-          setEsp32Data(parsedQR.esp32_data);
-          setScanResult(`✅ ${data.message}\n\n📦 Package: ${data.package_id}\n🔧 ESP32 Data Loaded from QR\n\n⚠️ Review the sensor data below and click Upload.`);
-          setShowUploadButton(true);
-        } else {
-          setScanResult(`✅ ${data.message}\n\n📦 Package: ${data.package_id}\n\n💡 Tip: Scan QR with ESP32 data or enter manually.`);
-          setShowUploadButton(true);
-        }
+        // Show success message
+        setScanResult(`✅ ${data.message}\n\n📦 Package: ${data.package_id}\n\n💡 Review sensor readings below and click Upload.`);
+        setShowUploadButton(true);
       } else {
         const error = await response.json();
         setScanResult(`❌ ${error.detail || 'Package not found'}`);
@@ -151,8 +161,13 @@ function DeliveryDashboard() {
     setIsSubmitting(true);
 
     try {
-      // Get package token from QR data or input
-      const token = qrData?.package_token || packageToken;
+      // Get package token - use demo token if needed
+      let token = qrData?.package_token || packageToken;
+      
+      // Ensure we have a valid token
+      if (!token || (!token.includes('demo_token') && !token.includes('PKG'))) {
+        token = 'demo_token_electronics_001';
+      }
 
       const response = await fetch('http://127.0.0.1:8000/delivery/upload-scan', {
         method: 'POST',
@@ -207,7 +222,9 @@ function DeliveryDashboard() {
       tamper_status: Math.random() > 0.9 ? 'tampered' : 'secure',
       battery_level: Math.floor(70 + Math.random() * 30),
       shock_detected: Math.random() > 0.95,
-      gps_location: '19.0760,72.8777'
+      gps_location: '19.0760,72.8777',
+      loop_connected: Math.random() > 0.1,
+      acceleration: (9.5 + Math.random() * 1).toFixed(2)
     });
   };
 
@@ -259,13 +276,8 @@ function DeliveryDashboard() {
     // Set the scanned text as package token
     setPackageToken(decodedText);
     
-    // Show what was scanned
-    setScanResult(`✅ QR Code Detected!\n\nScanned data: ${decodedText.substring(0, 100)}${decodedText.length > 100 ? '...' : ''}\n\nProcessing...`);
-    
-    // Automatically trigger scan after a moment
-    setTimeout(() => {
-      handleScanPackage();
-    }, 1000);
+    // Show what was scanned - NO AUTO VALIDATION
+    setScanResult(`✅ QR Code Scanned Successfully!\n\nData: ${decodedText.substring(0, 100)}${decodedText.length > 100 ? '...' : ''}\n\n👉 Click "Scan" button to validate package.`);
   };
 
   const onScanError = (errorMessage) => {
@@ -295,28 +307,28 @@ function DeliveryDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-linear-to-br from-orange-50 via-white to-red-50">
+    <div className="min-h-screen bg-slate-50">
       {/* Header */}
-      <nav className="bg-white/80 backdrop-blur-md shadow-sm border-b border-gray-200/50">
+      <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             {/* Logo & User Info */}
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10 bg-linear-to-br from-orange-600 to-red-600 rounded-xl flex items-center justify-center">
-                <span className="text-xl">🚚</span>
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-sm">
+                <span className="text-2xl">🚚</span>
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-800">
+                <h1 className="text-xl font-bold text-slate-900">
                   Delivery Hub
                 </h1>
-                <p className="text-sm text-gray-500">Welcome, {user.username}</p>
+                <p className="text-sm text-slate-500">Welcome, {user.username}</p>
               </div>
             </div>
 
             {/* Logout */}
             <button
               onClick={handleLogout}
-              className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
+              className="px-5 py-2.5 text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all font-medium"
             >
               Logout
             </button>
@@ -326,8 +338,8 @@ function DeliveryDashboard() {
 
       <div className="max-w-6xl mx-auto px-4 py-8">
         {/* Tab Navigation */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
-          <div className="border-b border-gray-200">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 mb-6">
+          <div className="border-b border-slate-200">
             <nav className="flex space-x-8 px-6">
               {[
                 { id: 'scanner', label: 'Package Scanner', icon: '📱' },
@@ -374,7 +386,7 @@ function DeliveryDashboard() {
                     <div className="space-y-4">
                       {/* Camera Scanner */}
                       {!showCamera && (
-                        <div className="text-center">
+                        <div className="space-y-4">
                           <button
                             onClick={startCameraScanner}
                             className="w-full py-4 bg-linear-to-br from-blue-600 to-indigo-600 text-white rounded-lg font-bold text-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-lg flex items-center justify-center gap-3"
@@ -382,54 +394,20 @@ function DeliveryDashboard() {
                             <span className="text-2xl">📷</span>
                             Open Camera to Scan QR
                           </button>
-                        </div>
-                      )}
-
-                      {/* Camera View */}
-                      {showCamera && (
-                        <div className="space-y-3">
-                          <div className="p-4 bg-blue-50 border border-blue-300 rounded-lg">
-                            <p className="text-sm text-blue-800 mb-2">
-                              📷 <strong>To start camera:</strong>
-                            </p>
-                            <ol className="text-xs text-blue-700 space-y-1 ml-4">
-                              <li>1. Click "Request Camera Permissions" button below</li>
-                              <li>2. Browser will ask for permission</li>
-                              <li>3. Click "Allow" to start camera</li>
-                              <li>4. Or click "Scan an Image File" to upload QR image</li>
-                            </ol>
-                          </div>
-                          <div 
-                            id="qr-reader" 
-                            ref={scannerRef}
-                            className="rounded-lg overflow-hidden border-2 border-blue-500"
-                          ></div>
-                          <button
-                            onClick={stopCameraScanner}
-                            className="w-full py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors"
-                          >
-                            Close Camera
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Manual Entry */}
-                      {!showCamera && (
-                        <div>
-                          <div className="text-center text-sm text-gray-500 mb-2">
-                            Or enter manually
-                          </div>
-                          <div className="flex gap-3">
+                          
+                          <div className="text-center text-sm text-gray-500">Or enter manually</div>
+                          
+                          <div className="flex gap-2">
                             <input
                               type="text"
                               value={packageToken}
                               onChange={(e) => setPackageToken(e.target.value)}
-                              className="flex-1 p-3 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none"
                               placeholder="Paste QR JSON or token"
+                              className="flex-1 p-3 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none"
                             />
                             <button
                               onClick={handleScanPackage}
-                              disabled={isScanning}
+                              disabled={isScanning || !packageToken}
                               className="px-6 py-3 bg-orange-600 text-white rounded-lg font-semibold hover:bg-orange-700 transition-colors disabled:opacity-50"
                             >
                               {isScanning ? 'Scanning...' : 'Scan'}
@@ -438,7 +416,21 @@ function DeliveryDashboard() {
                         </div>
                       )}
 
-                      {/* Package Info */}
+                      {/* Camera View */}
+                      {showCamera && (
+                        <div className="space-y-3">
+                          <div id="qr-reader" className="w-full"></div>
+                          
+                          <button
+                            onClick={stopCameraScanner}
+                            className="w-full py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
+                          >
+                            ❌ Stop Camera
+                          </button>
+                        </div>
+                      )}
+                      
+                      {/* Package Information */}
                       {packageData && (
                         <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                           <h4 className="font-semibold text-green-800 mb-2">Package Information</h4>
@@ -490,35 +482,51 @@ function DeliveryDashboard() {
                         </select>
                       </div>
 
-                      {/* ESP32 Data Display */}
-                      <div className="p-4 bg-white border border-gray-300 rounded-lg">
-                        <h4 className="font-semibold text-gray-800 mb-3">📊 Sensor Readings</h4>
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                          <div className="p-2 bg-blue-50 rounded">
-                            <span className="text-gray-600">🌡️ Temperature:</span>
-                            <span className="font-bold ml-2">{esp32Data.temperature}°C</span>
+                      {/* ESP32 Data Display - Only show after QR scan */}
+                      {esp32Data ? (
+                        <div className="p-4 bg-white border border-gray-300 rounded-lg">
+                          <h4 className="font-semibold text-gray-800 mb-3">📊 Sensor Readings</h4>
+                          <div className="grid grid-cols-2 gap-3 text-sm">
+                            <div className="p-2 bg-blue-50 rounded">
+                              <span className="text-gray-600">🌡️ Temperature:</span>
+                              <span className="font-bold ml-2">{esp32Data.temperature}°C</span>
+                            </div>
+                            <div className="p-2 bg-blue-50 rounded">
+                              <span className="text-gray-600">💧 Humidity:</span>
+                              <span className="font-bold ml-2">{esp32Data.humidity}%</span>
+                            </div>
+                            <div className="p-2 bg-blue-50 rounded">
+                              <span className="text-gray-600">🔋 Battery:</span>
+                              <span className="font-bold ml-2">{esp32Data.battery_level}%</span>
+                            </div>
+                            <div className="p-2 bg-blue-50 rounded">
+                              <span className="text-gray-600">🔒 Tamper:</span>
+                              <span className={`font-bold ml-2 ${esp32Data.tamper_status === 'secure' ? 'text-green-600' : 'text-red-600'}`}>
+                                {esp32Data.tamper_status === 'secure' ? '✅ Secure' : '⚠️ Tampered'}
+                              </span>
+                            </div>
+                            <div className="p-2 bg-blue-50 rounded">
+                              <span className="text-gray-600">🔌 Loop:</span>
+                              <span className={`font-bold ml-2 ${esp32Data.loop_connected ? 'text-green-600' : 'text-red-600'}`}>
+                                {esp32Data.loop_connected ? '✅ Connected' : '❌ Broken'}
+                              </span>
+                            </div>
+                            <div className="p-2 bg-blue-50 rounded">
+                              <span className="text-gray-600">📊 Acceleration:</span>
+                              <span className="font-bold ml-2">{esp32Data.acceleration} m/s²</span>
+                            </div>
                           </div>
-                          <div className="p-2 bg-blue-50 rounded">
-                            <span className="text-gray-600">💧 Humidity:</span>
-                            <span className="font-bold ml-2">{esp32Data.humidity}%</span>
-                          </div>
-                          <div className="p-2 bg-blue-50 rounded">
-                            <span className="text-gray-600">🔋 Battery:</span>
-                            <span className="font-bold ml-2">{esp32Data.battery_level}%</span>
-                          </div>
-                          <div className="p-2 bg-blue-50 rounded">
-                            <span className="text-gray-600">🔒 Status:</span>
-                            <span className={`font-bold ml-2 ${esp32Data.tamper_status === 'secure' ? 'text-green-600' : 'text-red-600'}`}>
-                              {esp32Data.tamper_status === 'secure' ? '✅ Secure' : '⚠️ Tampered'}
-                            </span>
-                          </div>
+                          {qrData && (
+                            <div className="mt-2 text-xs text-green-600">
+                              ✅ Data loaded from QR code
+                            </div>
+                          )}
                         </div>
-                        {qrData && (
-                          <div className="mt-2 text-xs text-green-600">
-                            ✅ Data loaded from QR code
-                          </div>
-                        )}
-                      </div>
+                      ) : (
+                        <div className="p-6 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg text-center">
+                          <p className="text-gray-500">📱 Scan a QR code to view sensor readings</p>
+                        </div>
+                      )}
 
                       <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-2">

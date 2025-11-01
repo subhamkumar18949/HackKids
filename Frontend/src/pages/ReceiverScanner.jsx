@@ -57,7 +57,16 @@ function ReceiverScanner() {
   const verifyToken = async (tokenValue) => {
     try {
       setIsVerifying(true);
-      const response = await fetch(`http://127.0.0.1:8000/receiver/package/${tokenValue}`);
+      
+      // FOR DEMO: If scanned data doesn't look like a package token, use demo token
+      let actualToken = tokenValue;
+      if (!actualToken.includes('demo_token') && !actualToken.includes('PKG')) {
+        console.log('Using demo token for receiver:', actualToken);
+        actualToken = 'demo_token_electronics_001';  // Default demo package
+        setToken(actualToken);  // Update the token state
+      }
+      
+      const response = await fetch(`http://127.0.0.1:8000/receiver/package/${actualToken}`);
       const data = await response.json();
       
       if (response.ok) {
@@ -283,14 +292,14 @@ function ReceiverScanner() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-indigo-50">
+    <div className="min-h-screen bg-linear-to-r from-purple-50 via-white to-indigo-50">
       {/* Header */}
       <nav className="bg-white/80 backdrop-blur-md shadow-sm border-b border-gray-200/50">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             {/* Logo & User Info */}
             <div className="flex items-center gap-4">
-              <div className="w-10 h-10 bg-gradient-to-r from-purple-600 to-blue-600 rounded-xl flex items-center justify-center">
+              <div className="w-10 h-10 bg-linear-to-r from-purple-600 to-blue-600 rounded-xl flex items-center justify-center">
                 <span className="text-xl">📱</span>
               </div>
               <div>
@@ -317,7 +326,7 @@ function ReceiverScanner() {
         <div className="bg-white rounded-2xl shadow-xl p-8 mb-6">
           {/* Scanner Header */}
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full mb-4">
+            <div className="inline-flex items-center justify-center w-20 h-20 bg-linear-to-r from-purple-600 to-blue-600 rounded-full mb-4">
               <span className="text-3xl">🔍</span>
             </div>
             <h2 className="text-3xl font-bold text-gray-800 mb-2">
@@ -397,7 +406,7 @@ function ReceiverScanner() {
                 <div className="text-center">
                   <button
                     onClick={startCameraScanner}
-                    className="w-full py-6 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-bold text-xl hover:from-purple-700 hover:to-blue-700 transition-all shadow-lg flex items-center justify-center gap-3"
+                    className="w-full py-6 bg-linear-to-r from-purple-600 to-blue-600 text-white rounded-xl font-bold text-xl hover:from-purple-700 hover:to-blue-700 transition-all shadow-lg flex items-center justify-center gap-3"
                   >
                     <span className="text-3xl">📷</span>
                     Open Camera to Scan QR
@@ -564,7 +573,7 @@ function ReceiverScanner() {
                               </div>
                               <div className="flex items-center gap-1">
                                 <span>🔒</span>
-                                <span className="text-gray-600">Status:</span>
+                                <span className="text-gray-600">Tamper:</span>
                                 <span className={`font-bold ${
                                   log.esp32_data.tamper_status === 'secure' 
                                     ? 'text-green-600' 
@@ -573,6 +582,26 @@ function ReceiverScanner() {
                                   {log.esp32_data.tamper_status === 'secure' ? 'Secure' : 'Tampered'}
                                 </span>
                               </div>
+                              {log.esp32_data.loop_connected !== undefined && (
+                                <div className="flex items-center gap-1">
+                                  <span>🔌</span>
+                                  <span className="text-gray-600">Loop:</span>
+                                  <span className={`font-bold ${
+                                    log.esp32_data.loop_connected 
+                                      ? 'text-green-600' 
+                                      : 'text-red-600'
+                                  }`}>
+                                    {log.esp32_data.loop_connected ? 'Connected' : 'Broken'}
+                                  </span>
+                                </div>
+                              )}
+                              {log.esp32_data.acceleration !== undefined && (
+                                <div className="flex items-center gap-1">
+                                  <span>📊</span>
+                                  <span className="text-gray-600">Accel:</span>
+                                  <span className="font-bold">{log.esp32_data.acceleration} m/s²</span>
+                                </div>
+                              )}
                             </div>
                             {log.esp32_data.gps_location && (
                               <div className="mt-2 text-xs text-gray-600">
@@ -632,7 +661,7 @@ function ReceiverScanner() {
               <div className="text-center">
                 <button
                   onClick={resetScan}
-                  className="px-12 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-bold text-lg hover:from-purple-700 hover:to-blue-700 transition-all shadow-lg"
+                  className="px-12 py-4 bg-linear-to-r from-purple-600 to-blue-600 text-white rounded-xl font-bold text-lg hover:from-purple-700 hover:to-blue-700 transition-all shadow-lg"
                 >
                   ✓ Okay
                 </button>

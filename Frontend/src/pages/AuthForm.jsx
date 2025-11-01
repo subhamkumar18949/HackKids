@@ -23,25 +23,19 @@ function AuthForm() {
     sender: {
       title: 'Sender',
       icon: '📦',
-      color: 'from-blue-500 to-blue-600',
-      bgColor: 'bg-blue-50',
-      borderColor: 'border-blue-200',
+      color: 'from-blue-600 to-blue-700',
       description: 'Restaurants, pharmacies, retailers'
     },
     receiver: {
       title: 'Receiver', 
       icon: '📱',
-      color: 'from-purple-500 to-purple-600',
-      bgColor: 'bg-purple-50',
-      borderColor: 'border-purple-200',
+      color: 'from-indigo-600 to-indigo-700',
       description: 'Customers receiving packages'
     },
     delivery: {
-      title: 'Delivery Guy',
+      title: 'Logistics',
       icon: '🚚', 
-      color: 'from-orange-500 to-orange-600',
-      bgColor: 'bg-orange-50',
-      borderColor: 'border-orange-200',
+      color: 'from-blue-600 to-indigo-600',
       description: 'Drivers and couriers'
     }
   };
@@ -128,28 +122,28 @@ function AuthForm() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-slate-50">
       {/* Navigation */}
-      <nav className="bg-white/80 backdrop-blur-md shadow-sm border-b border-gray-200/50">
-        <div className="max-w-7xl mx-auto px-4 py-4">
+      <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             {/* Logo */}
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-sm">
                 <span className="text-xl font-bold text-white">V</span>
               </div>
               <div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                <h1 className="text-xl font-bold text-slate-900">
                   VeriSeal
                 </h1>
-                <p className="text-xs text-gray-500">Secure Package Verification</p>
+                <p className="text-xs text-slate-500">Secure Package Verification</p>
               </div>
             </div>
 
             {/* Back Button */}
             <button
               onClick={() => navigate('/')}
-              className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
+              className="px-5 py-2.5 text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all font-medium"
             >
               ← Back to Home
             </button>
@@ -160,25 +154,25 @@ function AuthForm() {
       <div className="max-w-md mx-auto px-4 py-12">
         {/* Role Header */}
         <div className="text-center mb-8">
-          <div className={`inline-flex items-center justify-center w-20 h-20 bg-gradient-to-r ${currentRole.color} rounded-2xl mb-4`}>
+          <div className={`inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br ${currentRole.color} rounded-2xl mb-4 shadow-lg shadow-blue-500/20`}>
             <span className="text-3xl text-white">{currentRole.icon}</span>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">
             {mode === 'signup' ? 'Sign Up' : 'Sign In'} as {currentRole.title}
           </h1>
-          <p className="text-gray-600">{currentRole.description}</p>
+          <p className="text-slate-600">{currentRole.description}</p>
         </div>
 
         {/* Auth Form */}
-        <div className="bg-white rounded-2xl shadow-xl p-8">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Role Display (Locked) */}
-            <div className={`p-4 ${currentRole.bgColor} ${currentRole.borderColor} border rounded-xl`}>
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center gap-3">
                 <span className="text-2xl">{currentRole.icon}</span>
                 <div>
-                  <p className="font-semibold text-gray-800">Role: {currentRole.title}</p>
-                  <p className="text-sm text-gray-600">This role is locked for this registration</p>
+                  <p className="font-semibold text-slate-900">Role: {currentRole.title}</p>
+                  <p className="text-sm text-slate-600">This role is locked for this registration</p>
                 </div>
               </div>
             </div>
@@ -186,7 +180,7 @@ function AuthForm() {
             {/* Username (Signup only) */}
             {mode === 'signup' && (
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
                   Username
                 </label>
                 <input
@@ -194,7 +188,7 @@ function AuthForm() {
                   name="username"
                   value={formData.username}
                   onChange={handleInputChange}
-                  className="w-full p-3 border border-gray-300 rounded-xl focus:border-blue-500 focus:outline-none"
+                  className="w-full p-3 border border-slate-300 rounded-lg focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 focus:outline-none transition-all"
                   placeholder="Enter your username"
                   required
                 />
@@ -203,7 +197,7 @@ function AuthForm() {
 
             {/* Email */}
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
                 Email Address
               </label>
               <input
@@ -211,7 +205,7 @@ function AuthForm() {
                 name="email"
                 value={formData.email}
                 onChange={handleInputChange}
-                className="w-full p-3 border border-gray-300 rounded-xl focus:border-blue-500 focus:outline-none"
+                className="w-full p-3 border border-slate-300 rounded-lg focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 focus:outline-none transition-all"
                 placeholder="Enter your email"
                 required
               />
@@ -219,7 +213,7 @@ function AuthForm() {
 
             {/* Password */}
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
                 Password
               </label>
               <input
@@ -227,7 +221,7 @@ function AuthForm() {
                 name="password"
                 value={formData.password}
                 onChange={handleInputChange}
-                className="w-full p-3 border border-gray-300 rounded-xl focus:border-blue-500 focus:outline-none"
+                className="w-full p-3 border border-slate-300 rounded-lg focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 focus:outline-none transition-all"
                 placeholder="Enter your password"
                 required
               />
@@ -236,7 +230,7 @@ function AuthForm() {
             {/* Confirm Password (Signup only) */}
             {mode === 'signup' && (
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-semibold text-slate-700 mb-2">
                   Confirm Password
                 </label>
                 <input
@@ -244,7 +238,7 @@ function AuthForm() {
                   name="confirmPassword"
                   value={formData.confirmPassword}
                   onChange={handleInputChange}
-                  className="w-full p-3 border border-gray-300 rounded-xl focus:border-blue-500 focus:outline-none"
+                  className="w-full p-3 border border-slate-300 rounded-lg focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 focus:outline-none transition-all"
                   placeholder="Confirm your password"
                   required
                 />
@@ -256,7 +250,7 @@ function AuthForm() {
               <>
                 {/* Phone for all roles */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Phone Number {role === 'receiver' && <span className="text-red-500">*</span>}
                   </label>
                   <input
@@ -264,7 +258,7 @@ function AuthForm() {
                     name="phone"
                     value={formData.phone}
                     onChange={handleInputChange}
-                    className="w-full p-3 border border-gray-300 rounded-xl focus:border-blue-500 focus:outline-none"
+                    className="w-full p-3 border border-slate-300 rounded-lg focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 focus:outline-none transition-all"
                     placeholder="Enter your phone number"
                     required={role === 'receiver'}
                   />
@@ -273,7 +267,7 @@ function AuthForm() {
                 {/* Company Name for sender */}
                 {role === 'sender' && (
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
                       Company Name
                     </label>
                     <input
@@ -281,7 +275,7 @@ function AuthForm() {
                       name="company_name"
                       value={formData.company_name}
                       onChange={handleInputChange}
-                      className="w-full p-3 border border-gray-300 rounded-xl focus:border-blue-500 focus:outline-none"
+                      className="w-full p-3 border border-slate-300 rounded-lg focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 focus:outline-none transition-all"
                       placeholder="Enter your company name"
                     />
                   </div>
@@ -300,10 +294,10 @@ function AuthForm() {
             <button
               type="submit"
               disabled={isLoading}
-              className={`w-full py-3 rounded-xl font-semibold text-white transition-all duration-200 ${
+              className={`w-full py-3 rounded-lg font-semibold text-white transition-all ${
                 isLoading
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : `bg-gradient-to-r ${currentRole.color} hover:shadow-lg transform hover:scale-105`
+                  ? 'bg-slate-400 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-700 shadow-sm'
               }`}
             >
               {isLoading ? (
@@ -319,11 +313,11 @@ function AuthForm() {
 
           {/* Switch Mode */}
           <div className="mt-6 text-center">
-            <p className="text-gray-600">
+            <p className="text-slate-600">
               {mode === 'signup' ? 'Already have an account?' : "Don't have an account?"}
               <button
                 onClick={switchMode}
-                className={`ml-2 font-semibold bg-gradient-to-r ${currentRole.color} bg-clip-text text-transparent hover:underline`}
+                className="ml-2 font-semibold text-blue-600 hover:text-blue-700 hover:underline"
               >
                 {mode === 'signup' ? 'Sign In' : 'Sign Up'}
               </button>

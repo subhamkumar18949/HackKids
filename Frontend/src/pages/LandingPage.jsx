@@ -22,46 +22,40 @@ function LandingPage() {
       title: 'Sender',
       description: 'Restaurants, pharmacies, retailers sending packages',
       icon: '📦',
-      color: 'from-blue-500 to-blue-600',
-      bgColor: 'bg-blue-50',
-      borderColor: 'border-blue-200'
+      color: 'from-blue-600 to-blue-700'
     },
     {
       id: 'receiver',
       title: 'Receiver',
       description: 'Customers receiving and verifying packages',
       icon: '📱',
-      color: 'from-purple-500 to-purple-600',
-      bgColor: 'bg-purple-50',
-      borderColor: 'border-purple-200'
+      color: 'from-indigo-600 to-indigo-700'
     },
     {
       id: 'delivery',
-      title: 'Delivery Guy',
+      title: 'Logistics',
       description: 'Drivers and couriers managing deliveries',
       icon: '🚚',
-      color: 'from-orange-500 to-orange-600',
-      bgColor: 'bg-orange-50',
-      borderColor: 'border-orange-200'
+      color: 'from-blue-600 to-indigo-600'
     }
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-slate-50">
       {/* Navigation */}
-      <nav className="bg-white/80 backdrop-blur-md shadow-sm border-b border-gray-200/50">
-        <div className="max-w-7xl mx-auto px-4 py-4">
+      <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             {/* Logo */}
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-sm">
                 <span className="text-xl font-bold text-white">V</span>
               </div>
               <div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                <h1 className="text-xl font-bold text-slate-900">
                   VeriSeal
                 </h1>
-                <p className="text-xs text-gray-500">Secure Package Verification</p>
+                <p className="text-xs text-slate-500">Secure Package Verification</p>
               </div>
             </div>
 
@@ -70,13 +64,13 @@ function LandingPage() {
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => handleAuthClick('login')}
-                  className="px-6 py-2 text-gray-700 font-medium hover:text-blue-600 transition-colors"
+                  className="px-5 py-2.5 text-slate-700 font-medium hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-all"
                 >
                   Login
                 </button>
                 <button
                   onClick={() => handleAuthClick('signup')}
-                  className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-medium rounded-xl hover:shadow-lg transition-all duration-200"
+                  className="px-5 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-all shadow-sm"
                 >
                   Sign Up
                 </button>
@@ -104,14 +98,14 @@ function LandingPage() {
                 </div>
               </div>
 
-              <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6 leading-tight">
+              <h1 className="text-5xl md:text-6xl font-bold text-slate-900 mb-6 leading-tight">
                 Secure Package
-                <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent block">
+                <span className="text-blue-600 block">
                   Verification
                 </span>
               </h1>
 
-              <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto leading-relaxed">
+              <p className="text-xl text-slate-600 mb-8 max-w-2xl mx-auto leading-relaxed">
                 Revolutionary IoT-powered tamper detection and temperature monitoring 
                 for your most critical deliveries. Trust, verified.
               </p>
@@ -119,13 +113,13 @@ function LandingPage() {
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
                 <button
                   onClick={() => handleAuthClick('signup')}
-                  className="px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-xl hover:shadow-xl transform hover:scale-105 transition-all duration-200"
+                  className="px-8 py-4 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-all shadow-sm"
                 >
                   Get Started Free
                 </button>
                 <button
                   onClick={() => handleAuthClick('login')}
-                  className="px-8 py-4 border-2 border-gray-300 text-gray-700 font-semibold rounded-xl hover:border-blue-400 hover:text-blue-600 transition-all duration-200"
+                  className="px-8 py-4 border border-slate-300 text-slate-700 font-semibold rounded-lg hover:border-blue-600 hover:text-blue-600 transition-all"
                 >
                   Sign In
                 </button>
@@ -134,28 +128,28 @@ function LandingPage() {
 
             {/* Features Section */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-16">
-              <div className="text-center p-6">
-                <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-blue-200 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <div className="text-center p-6 bg-white rounded-xl border border-slate-200">
+                <div className="w-16 h-16 bg-blue-100 rounded-xl flex items-center justify-center mx-auto mb-4">
                   <span className="text-2xl">🔒</span>
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">Tamper Detection</h3>
-                <p className="text-gray-600">Real-time alerts when package integrity is compromised</p>
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">Tamper Detection</h3>
+                <p className="text-slate-600">Real-time alerts when package integrity is compromised</p>
               </div>
 
-              <div className="text-center p-6">
-                <div className="w-16 h-16 bg-gradient-to-br from-purple-100 to-purple-200 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <div className="text-center p-6 bg-white rounded-xl border border-slate-200">
+                <div className="w-16 h-16 bg-indigo-100 rounded-xl flex items-center justify-center mx-auto mb-4">
                   <span className="text-2xl">🌡️</span>
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">Temperature Monitoring</h3>
-                <p className="text-gray-600">Continuous cold chain monitoring for sensitive items</p>
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">Temperature Monitoring</h3>
+                <p className="text-slate-600">Continuous cold chain monitoring for sensitive items</p>
               </div>
 
-              <div className="text-center p-6">
-                <div className="w-16 h-16 bg-gradient-to-br from-orange-100 to-orange-200 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <div className="text-center p-6 bg-white rounded-xl border border-slate-200">
+                <div className="w-16 h-16 bg-blue-100 rounded-xl flex items-center justify-center mx-auto mb-4">
                   <span className="text-2xl">📱</span>
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">QR Verification</h3>
-                <p className="text-gray-600">Instant package verification with secure QR codes</p>
+                <h3 className="text-xl font-semibold text-slate-900 mb-2">QR Verification</h3>
+                <p className="text-slate-600">Instant package verification with secure QR codes</p>
               </div>
             </div>
 
@@ -177,15 +171,15 @@ function LandingPage() {
             <div className="text-center mb-12">
               <button
                 onClick={() => setShowRoleSelection(false)}
-                className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-6 transition-colors"
+                className="inline-flex items-center gap-2 text-slate-600 hover:text-slate-900 mb-6 transition-colors font-medium"
               >
                 <span>←</span> Back
               </button>
               
-              <h2 className="text-4xl font-bold text-gray-900 mb-4">
+              <h2 className="text-4xl font-bold text-slate-900 mb-4">
                 Choose Your Role
               </h2>
-              <p className="text-xl text-gray-600">
+              <p className="text-xl text-slate-600">
                 Select how you'll be using VeriSeal to {authMode === 'signup' ? 'create your account' : 'sign in'}
               </p>
             </div>
@@ -195,17 +189,17 @@ function LandingPage() {
                 <button
                   key={role.id}
                   onClick={() => handleRoleSelect(role.id)}
-                  className={`p-8 ${role.bgColor} ${role.borderColor} border-2 rounded-2xl hover:shadow-lg transform hover:scale-105 transition-all duration-200 text-left group`}
+                  className="p-8 bg-white border border-slate-200 rounded-xl hover:border-blue-600 hover:shadow-lg transition-all text-left group"
                 >
-                  <div className={`w-16 h-16 bg-gradient-to-r ${role.color} rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform`}>
+                  <div className={`w-16 h-16 bg-gradient-to-br ${role.color} rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform shadow-sm`}>
                     <span className="text-2xl text-white">{role.icon}</span>
                   </div>
                   
-                  <h3 className="text-2xl font-bold text-gray-900 mb-3">
+                  <h3 className="text-2xl font-bold text-slate-900 mb-3">
                     {role.title}
                   </h3>
                   
-                  <p className="text-gray-600 leading-relaxed">
+                  <p className="text-slate-600 leading-relaxed">
                     {role.description}
                   </p>
 
@@ -221,9 +215,9 @@ function LandingPage() {
       </div>
 
       {/* Footer */}
-      <footer className="bg-white/50 backdrop-blur-sm border-t border-gray-200/50 mt-16">
+      <footer className="bg-white border-t border-slate-200 mt-16">
         <div className="max-w-6xl mx-auto px-4 py-8">
-          <div className="text-center text-gray-600">
+          <div className="text-center text-slate-600">
             <p>&copy; 2025 VeriSeal. Securing deliveries with IoT innovation.</p>
           </div>
         </div>
